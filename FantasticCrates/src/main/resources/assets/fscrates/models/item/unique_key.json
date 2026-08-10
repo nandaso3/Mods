@@ -1,0 +1,329 @@
+{
+  "parent": "fscrates:item/keys/cp1_lvl1",
+  "overrides": [
+    {
+      "predicate": {
+        "custom_model_data": 1
+      },
+      "model": "fscrates:item/keys/cp1_lvl1"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 2
+      },
+      "model": "fscrates:item/keys/cp1_lvl2"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 3
+      },
+      "model": "fscrates:item/keys/cp1_lvl3"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 4
+      },
+      "model": "fscrates:item/keys/cp1_lvl4"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 5
+      },
+      "model": "fscrates:item/keys/aq_legendary"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 6
+      },
+      "model": "fscrates:item/keys/aq_mythic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 7
+      },
+      "model": "fscrates:item/keys/aq_vote"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 8
+      },
+      "model": "fscrates:item/keys/bg_key1"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 9
+      },
+      "model": "fscrates:item/keys/bg_key2"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 10
+      },
+      "model": "fscrates:item/keys/bg_key3"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 11
+      },
+      "model": "fscrates:item/keys/cp2_lvl1"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 12
+      },
+      "model": "fscrates:item/keys/cp2_lvl2"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 13
+      },
+      "model": "fscrates:item/keys/cp2_lvl3"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 14
+      },
+      "model": "fscrates:item/keys/cp2_lvl4"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 15
+      },
+      "model": "fscrates:item/keys/dd_common"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 16
+      },
+      "model": "fscrates:item/keys/dd_rare"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 17
+      },
+      "model": "fscrates:item/keys/dd_epic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 18
+      },
+      "model": "fscrates:item/keys/dd_legendary"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 19
+      },
+      "model": "fscrates:item/keys/dd_divine"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 20
+      },
+      "model": "fscrates:item/keys/ec_ice"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 21
+      },
+      "model": "fscrates:item/keys/ec_lava"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 22
+      },
+      "model": "fscrates:item/keys/ec_nature"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 23
+      },
+      "model": "fscrates:item/keys/ec_valentine"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 24
+      },
+      "model": "fscrates:item/keys/ec_wind"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 25
+      },
+      "model": "fscrates:item/keys/gb_k1b"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 26
+      },
+      "model": "fscrates:item/keys/gb_k1g"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 27
+      },
+      "model": "fscrates:item/keys/gb_k1i"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 28
+      },
+      "model": "fscrates:item/keys/gb_k2b"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 29
+      },
+      "model": "fscrates:item/keys/gb_k2g"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 30
+      },
+      "model": "fscrates:item/keys/gb_k2i"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 31
+      },
+      "model": "fscrates:item/keys/gb_k3b"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 32
+      },
+      "model": "fscrates:item/keys/gb_k3g"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 33
+      },
+      "model": "fscrates:item/keys/gb_k3i"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 34
+      },
+      "model": "fscrates:item/keys/gb_k4b"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 35
+      },
+      "model": "fscrates:item/keys/gb_k4g"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 36
+      },
+      "model": "fscrates:item/keys/gb_k4i"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 37
+      },
+      "model": "fscrates:item/keys/tf_explosive"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 38
+      },
+      "model": "fscrates:item/keys/tf_inhabitant"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 39
+      },
+      "model": "fscrates:item/keys/tf_owl"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 40
+      },
+      "model": "fscrates:item/keys/tf_piano"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 41
+      },
+      "model": "fscrates:item/keys/pr_key1"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 42
+      },
+      "model": "fscrates:item/keys/pr_key2"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 43
+      },
+      "model": "fscrates:item/keys/pr_key3"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 44
+      },
+      "model": "fscrates:item/keys/pr_key4"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 45
+      },
+      "model": "fscrates:item/keys/w6_common"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 46
+      },
+      "model": "fscrates:item/keys/w6_rare"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 47
+      },
+      "model": "fscrates:item/keys/w6_epic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 48
+      },
+      "model": "fscrates:item/keys/w6_legendary"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 49
+      },
+      "model": "fscrates:item/keys/w6_mythical"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 50
+      },
+      "model": "fscrates:item/keys/fsc_common"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 51
+      },
+      "model": "fscrates:item/keys/fsc_rare"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 52
+      },
+      "model": "fscrates:item/keys/fsc_epic"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 53
+      },
+      "model": "fscrates:item/keys/fsc_legendary"
+    },
+    {
+      "predicate": {
+        "custom_model_data": 54
+      },
+      "model": "fscrates:item/keys/fsc_mythic"
+    }
+  ]
+}

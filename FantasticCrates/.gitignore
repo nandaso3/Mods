@@ -1,0 +1,20 @@
+# Gradle / build
+build/
+.gradle/
+out/
+bin/
+
+# Entorno de pruebas de ForgeGradle (mundo, logs, config generada)
+run/
+runs/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+eclipse/

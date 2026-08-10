@@ -1,0 +1,13 @@
+{
+  "required": false,
+  "minVersion": "0.8",
+  "package": "com.fscrates.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "fscrates.refmap.json",
+  "client": [
+    "LevelRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 0
+  }
+}
