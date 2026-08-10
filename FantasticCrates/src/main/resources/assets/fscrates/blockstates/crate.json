@@ -1,0 +1,8 @@
+{
+  "variants": {
+    "facing=north": { "model": "fscrates:block/crate" },
+    "facing=south": { "model": "fscrates:block/crate", "y": 180 },
+    "facing=west":  { "model": "fscrates:block/crate", "y": 270 },
+    "facing=east":  { "model": "fscrates:block/crate", "y": 90 }
+  }
+}

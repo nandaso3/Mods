@@ -1,0 +1,12 @@
+{
+  "parent": "block/cube",
+  "textures": {
+    "particle": "fscrates:block/crate_side",
+    "down": "fscrates:block/crate_top",
+    "up": "fscrates:block/crate_top",
+    "north": "fscrates:block/crate_front",
+    "south": "fscrates:block/crate_side",
+    "east": "fscrates:block/crate_side",
+    "west": "fscrates:block/crate_side"
+  }
+}

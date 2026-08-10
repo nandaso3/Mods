@@ -1,0 +1,34 @@
+{
+  "block.fscrates.crate": "Crate",
+  "item.fscrates.crate": "Crate",
+  "item.fscrates.fantastic_key": "Fantastic Key",
+  "item.fscrates.unique_key": "Crate Key",
+
+  "fscrates.preopen.open": "▶ OPEN",
+  "fscrates.preopen.pool": "VIEW REWARD POOL",
+  "fscrates.preopen.subtitle": "Get ready to open your crate",
+  "fscrates.preopen.loading": "Loading media",
+  "fscrates.preopen.volume_hint": "Wheel: ±1",
+
+  "fscrates.pool.title": "✦ Reward pool",
+  "fscrates.pool.inventory": "❖ Inventory",
+  "fscrates.pool.crate": "❖ Pool",
+  "fscrates.pool.search": "Search...",
+  "fscrates.pool.close": "Close",
+  "fscrates.pool.empty_pool": "(no items in the pool)",
+  "fscrates.pool.empty_inventory": "(empty inventory)",
+
+  "fscrates.editor.tab.videos": "Videos",
+  "fscrates.editor.tab.musica": "Music",
+  "fscrates.editor.media.videos_title": "Pre-opening screen videos",
+  "fscrates.editor.media.music_title": "Pre-opening screen music",
+  "fscrates.editor.media.add": "Add",
+  "fscrates.editor.media.remove": "Remove selected",
+  "fscrates.editor.media.copy": "Copy to clipboard",
+  "fscrates.editor.media.hint": "https://... (direct link)",
+  "fscrates.editor.media.invalid": "That link is not valid: it must start with http:// or https://",
+  "fscrates.editor.settings.show_odds_on": "Show odds: Yes",
+  "fscrates.editor.settings.show_odds_off": "Show odds: No",
+
+  "fscrates.command.reload": "Fantastic Crates: Configuration reloaded from JSON."
+}
