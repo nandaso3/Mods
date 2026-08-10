@@ -1,8 +1,11 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
     id 'eclipse'
     id 'idea'
     id 'net.minecraftforge.gradle' version '[6.0,6.2)'
     id 'org.spongepowered.mixin' version '0.7.+'
+    id 'com.github.johnrengelman.shadow' version '8.1.1'
 }
 
 version = mod_version
@@ -104,7 +107,10 @@ tasks.named('processResources', ProcessResources).configure {
     }
 }
 
+// El jar "slim" lleva solo el mod (clases + recursos + refmap de Mixin).
+// Las librerias se anaden despues, ya reubicadas, en la tarea 'shadedJar'.
 tasks.named('jar', Jar).configure {
+    archiveClassifier = 'slim'
     manifest {
         attributes([
                 'Specification-Title'     : mod_id,
@@ -117,24 +123,74 @@ tasks.named('jar', Jar).configure {
         ])
     }
 
-    // Shade the pure-Java media libraries into the mod jar.
-    from({
-        configurations.shade.collect { it.isDirectory() ? it : zipTree(it) }
-    }) {
-        exclude 'META-INF/MANIFEST.MF'
-        exclude 'META-INF/*.SF'
-        exclude 'META-INF/*.DSA'
-        exclude 'META-INF/*.RSA'
-        exclude 'META-INF/maven/**'
-        exclude 'module-info.class'
-        exclude 'LICENSE*'
-        exclude 'NOTICE*'
-        exclude 'git.properties'
-        exclude 'org/jcodec/testing/**'
-    }
+    finalizedBy 'reobfJar'
+}
+
+// La tarea shadowJar que crea el plugin arrastraria TODO el classpath (Minecraft
+// incluido). No la usamos: montamos la nuestra a mano.
+tasks.named('shadowJar').configure {
+    enabled = false
+}
+
+/*
+ * Empaquetado final.
+ *
+ * jlayer y jcodec se reubican a com.fscrates.libs.* a proposito. Forge mete cada
+ * mod en su propio modulo de Java (JPMS) y dos modulos NO pueden exportar el
+ * mismo paquete: si otro mod trae las mismas librerias en la raiz del jar (por
+ * ejemplo Fantastic Pass, que tambien empaqueta jlayer, o mods de audio como
+ * etched o gamediscs) el juego ni arranca:
+ *
+ *   ResolutionException: Modules fantasticpass and fscrates export package
+ *                        javazoom.jl.player to module ...
+ *
+ * Al reubicarlas, nuestras copias viven en un paquete que solo es nuestro y
+ * dejan de chocar con nadie.
+ *
+ * Se parte del jar ya reobfuscado y se le anaden las librerias, asi que no hace
+ * falta volver a reobfuscar (la reubicacion no toca referencias a Minecraft).
+ */
+tasks.register('shadedJar', ShadowJar) {
+    dependsOn tasks.named('reobfJar')
+
+    archiveClassifier = ''
+    destinationDirectory = layout.buildDirectory.dir('libs')
+
+    from({ zipTree(tasks.named('jar', Jar).get().archiveFile.get().asFile) })
+    configurations = [project.configurations.shade]
+
+    relocate 'javazoom', "${mod_group_id}.libs.javazoom"
+    relocate 'org.jcodec', "${mod_group_id}.libs.org.jcodec"
+    relocate 'net.sourceforge.jaad', "${mod_group_id}.libs.net.sourceforge.jaad"
+
+    exclude 'META-INF/MANIFEST.MF'
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    exclude 'META-INF/maven/**'
+    exclude 'module-info.class'
+    exclude 'LICENSE*'
+    exclude 'NOTICE*'
+    exclude 'git.properties'
+    exclude 'org/jcodec/testing/**'
+
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-    finalizedBy 'reobfJar'
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.name,
+                'Implementation-Version'  : mod_version,
+                'Implementation-Vendor'   : mod_authors,
+                'MixinConfigs'            : "${mod_id}.mixins.json"
+        ])
+    }
+}
+
+tasks.named('assemble').configure {
+    dependsOn 'shadedJar'
 }
 
 tasks.withType(JavaCompile).configureEach {
