@@ -7,6 +7,7 @@ import com.fscrates.client.color.FSTextStyleScreen;
 import com.fscrates.client.media.MediaCache;
 import com.fscrates.client.render.CrateStyles;
 import com.fscrates.client.widget.ScrollSelector;
+import com.fscrates.client.widget.ScrollbarDrag;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.ParticleLayer;
 import com.fscrates.config.ParticleNames;
@@ -48,12 +49,35 @@ public class CrateEditorScreen extends Screen {
     private ParticleLayer selectedLayer;
     private int probScroll;
     private static final String COLOR_CHARS = "f7e6cab9d5234180";
-    /** Pestanas por fila del encabezado. */
-    private static final int TABS_PER_ROW = 6;
     /** Alto de una fila de pestanas (boton + separacion). */
     private static final int TAB_ROW_HEIGHT = 20;
+    /** Separacion horizontal entre pestanas. */
+    private static final int TAB_GAP = 2;
+    /** Filas que ocupa el encabezado; se calcula midiendo el texto en init(). */
+    private int headerRowCount = 2;
+    /** Ancho de la barra de scroll de la pestana de probabilidades. */
+    private static final int PROB_BAR_WIDTH = 5;
+    /** Arrastre de la barra de la pestana de probabilidades. */
+    private final ScrollbarDrag probDrag = new ScrollbarDrag();
+    private int lastMouseX;
+    private int lastMouseY;
     /** URL seleccionada en las pestanas de Videos / Musica. */
     private String selectedMediaUrl;
+    /** En Premios: coger items del inventario del jugador en vez del registro. */
+    private boolean rewardsFromInventory;
+
+    /** Items que el jugador lleva encima, para la pestana de Premios. */
+    private List<ItemStack> playerInventory() {
+        List<ItemStack> out = new ArrayList<>();
+        if (this.minecraft != null && this.minecraft.player != null) {
+            for (ItemStack stack : this.minecraft.player.getInventory().items) {
+                if (stack != null && !stack.isEmpty()) {
+                    out.add(stack);
+                }
+            }
+        }
+        return out;
+    }
 
     public CrateEditorScreen(CrateConfig config) {
         this(config, null);
@@ -67,8 +91,10 @@ public class CrateEditorScreen extends Screen {
 
     protected void init() {
         this.panelWidth = Math.min(this.width - 16, 540);
-        // Con mas de una fila de pestanas el panel crece para no comerse el cuerpo.
-        this.panelHeight = Math.min(this.height - 16, 320 + (headerRows() - 1) * TAB_ROW_HEIGHT);
+        // Cuantas filas de pestanas hacen falta depende de la fuente en uso.
+        this.headerRowCount = Math.max(1, this.packTabs().size());
+        // Con mas de una fila el panel crece para no comerse el cuerpo.
+        this.panelHeight = Math.min(this.height - 16, 320 + (this.headerRowCount - 1) * TAB_ROW_HEIGHT);
         this.leftPos = (this.width - this.panelWidth) / 2;
         this.topPos = (this.height - this.panelHeight) / 2;
         this.labels.clear();
@@ -111,18 +137,12 @@ public class CrateEditorScreen extends Screen {
         }
     }
 
-    /** Cuantas filas de pestanas hacen falta (max 6 por fila). */
-    private static int headerRows() {
-        int tabs = CrateEditorScreen.Tab.values().length;
-        return (tabs + TABS_PER_ROW - 1) / TABS_PER_ROW;
-    }
-
     private int bodyX() {
         return this.leftPos + 8;
     }
 
     private int bodyY() {
-        return this.topPos + 62 + (headerRows() - 1) * TAB_ROW_HEIGHT;
+        return this.topPos + 62 + (this.headerRowCount - 1) * TAB_ROW_HEIGHT;
     }
 
     private int bodyW() {
@@ -130,36 +150,83 @@ public class CrateEditorScreen extends Screen {
     }
 
     private int bodyH() {
-        return this.panelHeight - 62 - 28 - (headerRows() - 1) * TAB_ROW_HEIGHT;
+        return this.panelHeight - 62 - 28 - (this.headerRowCount - 1) * TAB_ROW_HEIGHT;
+    }
+
+    /**
+     * Reparte las pestanas en filas midiendo el ancho REAL de cada etiqueta.
+     *
+     * Antes se dividia el ancho a partes iguales suponiendo una fuente concreta,
+     * y con un resource pack de fuente distinta el texto no cabia y se solapaba
+     * entre botones. Ahora se mide con font.width() y se empaqueta en filas, asi
+     * que funciona con cualquier fuente.
+     */
+    private List<List<CrateEditorScreen.Tab>> packTabs() {
+        int available = this.panelWidth - 16;
+        List<List<CrateEditorScreen.Tab>> rows = new ArrayList<>();
+        List<CrateEditorScreen.Tab> row = new ArrayList<>();
+        int used = 0;
+
+        for (CrateEditorScreen.Tab tab : CrateEditorScreen.Tab.values()) {
+            int needed = this.tabMinWidth(tab);
+            int extra = row.isEmpty() ? needed : needed + TAB_GAP;
+            if (!row.isEmpty() && used + extra > available) {
+                rows.add(row);
+                row = new ArrayList<>();
+                used = 0;
+                extra = needed;
+            }
+            row.add(tab);
+            used += extra;
+        }
+        if (!row.isEmpty()) {
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    /** Ancho minimo de una pestana: el texto en negrita (estado activo) mas margen. */
+    private int tabMinWidth(CrateEditorScreen.Tab tab) {
+        int textWidth = this.font.width(tab.label);
+        // La pestana activa se dibuja en negrita, que es un pixel mas ancha por caracter.
+        return textWidth + tab.label.length() + 10;
     }
 
     private void initHeader() {
-        CrateEditorScreen.Tab[] tabs = CrateEditorScreen.Tab.values();
-        int rows = headerRows();
-        int perRow = (tabs.length + rows - 1) / rows;
+        List<List<CrateEditorScreen.Tab>> rows = this.packTabs();
         int available = this.panelWidth - 16;
 
-        for (int row = 0; row < rows; row++) {
-            int from = row * perRow;
-            int to = Math.min(tabs.length, from + perRow);
-            int count = to - from;
-            if (count <= 0) {
-                break;
+        for (int r = 0; r < rows.size(); r++) {
+            List<CrateEditorScreen.Tab> row = rows.get(r);
+            int count = row.size();
+
+            // Se reparte el espacio sobrante entre las pestanas de la fila, de
+            // forma proporcional a lo que necesita cada una.
+            int totalNeeded = 0;
+            for (CrateEditorScreen.Tab tab : row) {
+                totalNeeded += this.tabMinWidth(tab);
             }
+            int slack = Math.max(0, available - TAB_GAP * (count - 1) - totalNeeded);
 
-            int tabW = (available - 2 * (count - 1)) / count;
             int x = this.leftPos + 8;
-            int y = this.topPos + 24 + row * TAB_ROW_HEIGHT;
+            int y = this.topPos + 24 + r * TAB_ROW_HEIGHT;
 
-            for (int i = from; i < to; i++) {
-                CrateEditorScreen.Tab tab = tabs[i];
+            for (int i = 0; i < count; i++) {
+                CrateEditorScreen.Tab tab = row.get(i);
+                int width = this.tabMinWidth(tab) + (totalNeeded > 0 ? slack * this.tabMinWidth(tab) / totalNeeded : 0);
+                if (i == count - 1) {
+                    // La ultima cuadra hasta el borde para que no queden huecos raros.
+                    width = Math.max(width, this.leftPos + 8 + available - x);
+                }
+
                 boolean active = tab == this.activeTab;
                 String text = (active ? "\u00a7f\u00a7l" : "\u00a77") + tab.label;
+                int buttonX = x;
                 this.addRenderableWidget(Button.builder(Component.literal(text), b -> {
                     this.activeTab = tab;
                     this.rebuildWidgets();
-                }).bounds(x, y, tabW, 18).build());
-                x += tabW + 2;
+                }).bounds(buttonX, y, width, 18).build());
+                x += width + TAB_GAP;
             }
         }
     }
@@ -304,30 +371,91 @@ public class CrateEditorScreen extends Screen {
             search.setResponder(effects::setQuery);
             this.addRenderableWidget(effects);
         } else {
-            search.setHint(Component.literal("Buscar item..."));
+            // Alternador entre el registro completo del juego y el inventario del
+            // jugador. Coger del inventario es lo comodo cuando el item ya lleva
+            // encantamientos, nombre o NBT puesto: se copia tal cual.
+            int toggleW = Math.max(76, Math.max(this.font.width("Inventario"), this.font.width("Registro")) + 22);
+            search = new EditBox(this.font, x, y, colW - toggleW - 4, 16, Component.empty());
+            search.setHint(Component.literal(this.rewardsFromInventory ? "Buscar en tu inventario..." : "Buscar item..."));
             this.addRenderableWidget(search);
-            ScrollSelector<Item> items = new ScrollSelector<>(
-                x,
-                y + 20,
-                colW,
-                this.bodyH() - 22,
-                18,
-                RegistryLists::itemName,
-                it -> RegistryLists.itemName(it) + " " + RegistryLists.itemId(it),
-                it -> new ItemStack(it)
+
+            this.addRenderableWidget(
+                Button.builder(
+                        Component.literal(this.rewardsFromInventory ? "\u00a7e\u2756 Inventario" : "\u00a7b\u2756 Registro"),
+                        b -> {
+                            this.rewardsFromInventory = !this.rewardsFromInventory;
+                            this.rebuildWidgets();
+                        }
+                    )
+                    .bounds(x + colW - toggleW, y, toggleW, 16)
+                    .build()
             );
-            items.setItems(RegistryLists.items());
-            items.onSelect(it -> {
-                RewardEntry r2 = new RewardEntry(RewardEntry.Type.ITEM);
-                r2.item = new ItemStack(it);
-                r2.label = RegistryLists.itemName(it);
-                r2.chance = 10.0;
-                this.config.rewards.add(r2);
-                this.selectedReward = r2;
-                this.rebuildWidgets();
-            });
-            search.setResponder(items::setQuery);
-            this.addRenderableWidget(items);
+            this.tooltipZones.add(
+                new CrateEditorScreen.TooltipZone(
+                    x + colW - toggleW,
+                    y,
+                    toggleW,
+                    16,
+                    desc(
+                        "\u00a7bRegistro\u00a77: todos los items del juego y de los mods.",
+                        "\u00a7eInventario\u00a77: los items que llevas encima.",
+                        "",
+                        "Cogerlo del inventario copia el item \u00a7fCON su NBT\u00a77:",
+                        "encantamientos, nombre, lore, atributos... tal cual."
+                    )
+                )
+            );
+
+            if (this.rewardsFromInventory) {
+                ScrollSelector<ItemStack> inventory = new ScrollSelector<>(
+                    x,
+                    y + 20,
+                    colW,
+                    this.bodyH() - 22,
+                    18,
+                    st -> "\u00a7f" + st.getHoverName().getString() + (st.getCount() > 1 ? " \u00a77x" + st.getCount() : ""),
+                    st -> st.getHoverName().getString() + " " + RegistryLists.itemId(st.getItem()),
+                    st -> st
+                );
+                inventory.setItems(this.playerInventory());
+                inventory.onSelect(st -> {
+                    RewardEntry r2 = new RewardEntry(RewardEntry.Type.ITEM);
+                    // copy() conserva el NBT completo del item del inventario.
+                    r2.item = st.copy();
+                    r2.label = st.getHoverName().getString();
+                    r2.minAmount = st.getCount();
+                    r2.maxAmount = st.getCount();
+                    r2.chance = 10.0;
+                    this.config.rewards.add(r2);
+                    this.selectedReward = r2;
+                    this.rebuildWidgets();
+                });
+                search.setResponder(inventory::setQuery);
+                this.addRenderableWidget(inventory);
+            } else {
+                ScrollSelector<Item> items = new ScrollSelector<>(
+                    x,
+                    y + 20,
+                    colW,
+                    this.bodyH() - 22,
+                    18,
+                    RegistryLists::itemName,
+                    it -> RegistryLists.itemName(it) + " " + RegistryLists.itemId(it),
+                    it -> new ItemStack(it)
+                );
+                items.setItems(RegistryLists.items());
+                items.onSelect(it -> {
+                    RewardEntry r2 = new RewardEntry(RewardEntry.Type.ITEM);
+                    r2.item = new ItemStack(it);
+                    r2.label = RegistryLists.itemName(it);
+                    r2.chance = 10.0;
+                    this.config.rewards.add(r2);
+                    this.selectedReward = r2;
+                    this.rebuildWidgets();
+                });
+                search.setResponder(items::setQuery);
+                this.addRenderableWidget(items);
+            }
         }
 
         Object selR = null;
@@ -1540,6 +1668,10 @@ public class CrateEditorScreen extends Screen {
     }
 
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        // Se guarda para poder resaltar la barra de scroll de Probabilidades,
+        // que se dibuja desde un metodo sin acceso a la posicion del raton.
+        this.lastMouseX = mouseX;
+        this.lastMouseY = mouseY;
         this.renderBackground(g);
         g.fill(this.leftPos, this.topPos, this.leftPos + this.panelWidth, this.topPos + this.panelHeight, -535291870);
         g.fill(this.leftPos, this.topPos, this.leftPos + this.panelWidth, this.topPos + 20, -14408646);
@@ -1619,14 +1751,80 @@ public class CrateEditorScreen extends Screen {
             }
 
             if (maxScroll > 0) {
-                int trackX = this.leftPos + this.panelWidth - 12;
-                int trackH = visibleRows * 22;
-                g.fill(trackX, y, trackX + 4, y + trackH, 1610612736);
-                int thumbH = Math.max(10, trackH * visibleRows / total);
-                int thumbY = y + (trackH - thumbH) * scroll / maxScroll;
-                g.fill(trackX, thumbY, trackX + 4, thumbY + thumbH, -8355680);
+                boolean hot = this.probDrag.isDragging()
+                    || ScrollbarDrag.overTrack(this.lastMouseX, this.lastMouseY, this.probBarX(), PROB_BAR_WIDTH, y, this.probTrackHeight());
+                FSGui.scrollbar(
+                    g,
+                    this.probBarX(),
+                    y,
+                    PROB_BAR_WIDTH,
+                    this.probTrackHeight(),
+                    this.probThumbTop(),
+                    this.probThumbHeight(),
+                    hot
+                );
             }
         }
+    }
+
+    // ---------------------------------------------- scrollbar de Probabilidades
+
+    private int probVisibleRows() {
+        return Math.max(1, this.bodyH() / 22);
+    }
+
+    private int probMaxScroll() {
+        return Math.max(0, this.probRows().size() - this.probVisibleRows());
+    }
+
+    private int probTrackHeight() {
+        return this.probVisibleRows() * 22;
+    }
+
+    private int probBarX() {
+        return this.leftPos + this.panelWidth - 8 - PROB_BAR_WIDTH;
+    }
+
+    private int probThumbHeight() {
+        return ScrollbarDrag.thumbHeight(this.probTrackHeight(), this.probVisibleRows(), this.probRows().size());
+    }
+
+    private int probThumbTop() {
+        return ScrollbarDrag.thumbTop(
+            this.bodyY(), this.probTrackHeight(), this.probThumbHeight(), this.probScroll, this.probMaxScroll()
+        );
+    }
+
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // Barra de la pestana de probabilidades: arrastrable con click izquierdo o derecho.
+        if (this.activeTab == CrateEditorScreen.Tab.PROBABILITY
+            && ScrollbarDrag.isDragButton(button)
+            && this.probMaxScroll() > 0
+            && ScrollbarDrag.overTrack(mouseX, mouseY, this.probBarX(), PROB_BAR_WIDTH, this.bodyY(), this.probTrackHeight())) {
+            this.probScroll = this.probDrag.beginOnTrack(
+                mouseY, this.probScroll, this.bodyY(), this.probTrackHeight(), this.probThumbHeight(), this.probMaxScroll()
+            );
+            return true;
+        }
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+
+    public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        if (this.probDrag.isDragging()) {
+            this.probScroll = this.probDrag.drag(
+                mouseY, this.probTrackHeight(), this.probThumbHeight(), this.probMaxScroll()
+            );
+            return true;
+        }
+        return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
+    }
+
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (this.probDrag.isDragging()) {
+            this.probDrag.end();
+            return true;
+        }
+        return super.mouseReleased(mouseX, mouseY, button);
     }
 
     public boolean mouseScrolled(double mouseX, double mouseY, double delta) {

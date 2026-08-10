@@ -47,9 +47,6 @@ import net.minecraftforge.registries.ForgeRegistries;
 public final class JsonCrateLoader {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
-    /** Separador decorativo usado en las claves de comentario del JSON. */
-    private static final String RULE = "\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014\u2014";
-
     private JsonCrateLoader() {
     }
 
@@ -141,44 +138,66 @@ public final class JsonCrateLoader {
         }
 
         CrateConfig config = new CrateConfig(id.toLowerCase(Locale.ROOT));
-        config.displayName = string(json, "nombreVisible", config.displayName);
-        config.rarity = Rarity.byName(string(json, "rareza", config.rarity.name()));
 
-        config.styleId = string(json, "estiloBloque", config.styleId);
-        config.animationId = string(json, "animacion", config.animationId);
-        config.glow = bool(json, "brillar", config.glow);
-        config.particles = bool(json, "particulas", config.particles);
-        config.floatingName = bool(json, "mostrarNombreFlotante", config.floatingName);
-        config.nameColorHexOverride = string(json, "colorNombreHex", config.nameColorHexOverride);
-        config.sizeScale = (float) number(json, "escala", config.sizeScale);
-        config.yOffset = (float) number(json, "offsetAltura", config.yOffset);
-        config.yawOffset = (float) number(json, "offsetRotacion", config.yawOffset);
+        // Secciones del formato nuevo. Si no existen se usa la raiz, asi los
+        // archivos del formato plano antiguo siguen cargando igual.
+        JsonObject info = section(json, "informacion");
+        JsonObject visual = section(json, "visual");
+        JsonObject keys = section(json, "llaves");
+        JsonObject unique = section(keys, "llaveUnica");
+        JsonObject opening = section(json, "apertura");
+        JsonObject pity = section(json, "pity");
+        JsonObject media = section(json, "media");
+
+        config.displayName = string(info, "nombreVisible", config.displayName);
+        config.rarity = Rarity.byName(string(info, "rareza", config.rarity.name()));
+
+        config.styleId = string(visual, "estiloBloque", config.styleId);
+        config.animationId = string(visual, "animacion", config.animationId);
+        config.glow = bool(visual, "brillar", config.glow);
+        config.particles = bool(visual, "particulas", config.particles);
+        config.floatingName = bool(visual, "mostrarNombreFlotante", config.floatingName);
+        config.nameColorHexOverride = string(visual, "colorNombreHex", config.nameColorHexOverride);
+        config.sizeScale = (float) number(visual, "escala", config.sizeScale);
+        config.yOffset = (float) number(visual, "offsetAltura", config.yOffset);
+        config.yawOffset = (float) number(visual, "offsetRotacion", config.yawOffset);
 
         config.floatingText.clear();
-        config.floatingText.addAll(strings(json, "textoFlotante"));
+        config.floatingText.addAll(strings(visual, "textoFlotante"));
 
-        config.consumeKey = bool(json, "consumirLlave", config.consumeKey);
-        config.uniqueKeyEnabled = bool(json, "llaveUnicaActivada", config.uniqueKeyEnabled);
-        config.uniqueKeyModel = string(json, "llaveUnicaModelo", config.uniqueKeyModel);
-        config.uniqueKeyName = string(json, "llaveUnicaNombre", config.uniqueKeyName);
+        config.consumeKey = bool(keys, "consumirLlave", config.consumeKey);
+        config.uniqueKeyEnabled = bool(unique, "activada", bool(keys, "llaveUnicaActivada", config.uniqueKeyEnabled));
+        config.uniqueKeyModel = string(unique, "modelo", string(keys, "llaveUnicaModelo", config.uniqueKeyModel));
+        config.uniqueKeyName = string(unique, "nombre", string(keys, "llaveUnicaNombre", config.uniqueKeyName));
 
-        config.rolls = Math.max(1, (int) number(json, "tiradasPorApertura", config.rolls));
-        config.cooldownSeconds = Math.max(0, (int) number(json, "cooldownSegundos", config.cooldownSeconds));
+        config.rolls = Math.max(1, (int) number(opening, "tiradasPorApertura", config.rolls));
+        config.cooldownSeconds = Math.max(0, (int) number(opening, "cooldownSegundos", config.cooldownSeconds));
         // En el JSON el retraso va en SEGUNDOS; internamente son ticks.
-        if (json.has("retrasoAperturaSegundos")) {
-            config.openDelayTicks = Math.max(0, (int) Math.round(number(json, "retrasoAperturaSegundos", 0.0) * 20.0));
+        if (opening.has("retrasoAperturaSegundos")) {
+            config.openDelayTicks = Math.max(0, (int) Math.round(number(opening, "retrasoAperturaSegundos", 0.0) * 20.0));
         }
-        config.allowSkip = bool(json, "permitirSaltar", config.allowSkip);
-        config.broadcast = bool(json, "anuncioGlobal", config.broadcast);
-        config.openOncePerPlayer = bool(json, "soloUnAperturaPorJugador", config.openOncePerPlayer);
-        config.requiredPermission = string(json, "permisoRequerido", config.requiredPermission);
+        config.allowSkip = bool(opening, "permitirSaltar", config.allowSkip);
+        config.broadcast = bool(opening, "anuncioGlobal", config.broadcast);
+        config.openOncePerPlayer = bool(
+            opening, "soloUnaVezPorJugador", bool(opening, "soloUnAperturaPorJugador", config.openOncePerPlayer)
+        );
+        config.requiredPermission = string(opening, "permisoRequerido", config.requiredPermission);
+        config.showOdds = bool(opening, "mostrarProbabilidades", config.showOdds);
 
-        config.pityEnabled = bool(json, "pityActivado", config.pityEnabled);
-        config.pityInterval = Math.max(1, (int) number(json, "pityIntervalo", config.pityInterval));
-        config.pityRarity = Rarity.byName(string(json, "pityRareza", config.pityRarity.name()));
+        config.pityEnabled = bool(pity, "activado", bool(pity, "pityActivado", config.pityEnabled));
+        config.pityInterval = Math.max(
+            1, (int) number(pity, "cadaCuantasAperturas", number(pity, "pityIntervalo", config.pityInterval))
+        );
+        config.pityRarity = Rarity.byName(
+            string(pity, "rarezaGarantizada", string(pity, "pityRareza", config.pityRarity.name()))
+        );
 
-        if (json.has("probabilidadRareza") && json.get("probabilidadRareza").isJsonObject()) {
-            JsonObject chances = json.getAsJsonObject("probabilidadRareza");
+        JsonObject chances = json.has("probabilidadPorRareza") && json.get("probabilidadPorRareza").isJsonObject()
+            ? json.getAsJsonObject("probabilidadPorRareza")
+            : (json.has("probabilidadRareza") && json.get("probabilidadRareza").isJsonObject()
+                ? json.getAsJsonObject("probabilidadRareza")
+                : null);
+        if (chances != null) {
             config.rarityChances.clear();
             for (Rarity rarity : Rarity.values()) {
                 if (chances.has(rarity.name())) {
@@ -190,12 +209,10 @@ public final class JsonCrateLoader {
             }
         }
 
-        config.showOdds = bool(json, "mostrarProbabilidades", config.showOdds);
-
         config.videos.clear();
-        config.videos.addAll(strings(json, "videos"));
+        config.videos.addAll(strings(media, "videos"));
         config.music.clear();
-        config.music.addAll(strings(json, "musica"));
+        config.music.addAll(strings(media, "musica"));
 
         config.rewards.clear();
         if (json.has("recompensas") && json.get("recompensas").isJsonArray()) {
@@ -337,84 +354,132 @@ public final class JsonCrateLoader {
         }
     }
 
+    /**
+     * Estructura del archivo, en secciones para que se lea de un vistazo:
+     *
+     * {
+     *   "id", "_ayuda",
+     *   "informacion": { nombreVisible, rareza },
+     *   "visual":       { estiloBloque, animacion, brillar, ... },
+     *   "llaves":       { consumir, unica: {...} },
+     *   "apertura":     { tiradas, cooldownSegundos, ... },
+     *   "pity":         { activado, cadaCuantasAperturas, rareza },
+     *   "probabilidadPorRareza": { COMMON: .., RARE: .. },
+     *   "media":        { videos: [], musica: [] },
+     *   "recompensas":  [ ... ]
+     * }
+     */
     public static JsonObject toJson(CrateConfig config) {
         JsonObject root = new JsonObject();
 
-        root.addProperty("// IDENTIFICACION", RULE);
         root.addProperty("id", config.id);
-        root.addProperty("nombreVisible", config.displayName);
-        root.addProperty("rareza", config.rarity.name());
+        root.add("_ayuda", helpBlock());
 
-        root.addProperty("// ANIMACION Y VISUAL", RULE);
-        root.addProperty("estiloBloque", config.styleId == null ? "" : config.styleId);
-        root.addProperty("animacion", config.animationId == null ? "" : config.animationId);
-        root.addProperty("brillar", config.glow);
-        root.addProperty("particulas", config.particles);
-        root.addProperty("mostrarNombreFlotante", config.floatingName);
+        // ---- informacion
+        JsonObject info = new JsonObject();
+        info.addProperty("nombreVisible", config.displayName);
+        info.addProperty("rareza", config.rarity.name());
+        root.add("informacion", info);
+
+        // ---- visual
+        JsonObject visual = new JsonObject();
+        visual.addProperty("estiloBloque", config.styleId == null ? "" : config.styleId);
+        visual.addProperty("animacion", config.animationId == null ? "" : config.animationId);
+        visual.addProperty("brillar", config.glow);
+        visual.addProperty("particulas", config.particles);
+        visual.addProperty("mostrarNombreFlotante", config.floatingName);
         JsonArray floating = new JsonArray();
         config.floatingText.forEach(floating::add);
-        root.add("textoFlotante", floating);
-        root.addProperty("colorNombreHex", config.nameColorHexOverride == null ? "" : config.nameColorHexOverride);
-        root.addProperty("escala", config.sizeScale);
-        root.addProperty("offsetAltura", config.yOffset);
-        root.addProperty("offsetRotacion", config.yawOffset);
+        visual.add("textoFlotante", floating);
+        visual.addProperty("colorNombreHex", config.nameColorHexOverride == null ? "" : config.nameColorHexOverride);
+        visual.addProperty("escala", round(config.sizeScale));
+        visual.addProperty("offsetAltura", round(config.yOffset));
+        visual.addProperty("offsetRotacion", round(config.yawOffset));
+        root.add("visual", visual);
 
-        root.addProperty("// LLAVES", RULE);
-        root.addProperty("consumirLlave", config.consumeKey);
-        root.addProperty("llaveUnicaActivada", config.uniqueKeyEnabled);
-        root.addProperty("llaveUnicaModelo", config.uniqueKeyModel == null ? "" : config.uniqueKeyModel);
-        root.addProperty("llaveUnicaNombre", config.uniqueKeyName == null ? "" : config.uniqueKeyName);
+        // ---- llaves
+        JsonObject keys = new JsonObject();
+        keys.addProperty("consumirLlave", config.consumeKey);
+        JsonObject unique = new JsonObject();
+        unique.addProperty("activada", config.uniqueKeyEnabled);
+        unique.addProperty("modelo", config.uniqueKeyModel == null ? "" : config.uniqueKeyModel);
+        unique.addProperty("nombre", config.uniqueKeyName == null ? "" : config.uniqueKeyName);
+        keys.add("llaveUnica", unique);
+        root.add("llaves", keys);
 
-        root.addProperty("// APERTURA", RULE);
-        root.addProperty("tiradasPorApertura", config.rolls);
-        root.addProperty("cooldownSegundos", config.cooldownSeconds);
-        root.addProperty("retrasoAperturaSegundos", config.openDelayTicks / 20.0);
-        root.addProperty("permitirSaltar", config.allowSkip);
-        root.addProperty("anuncioGlobal", config.broadcast);
-        root.addProperty("soloUnAperturaPorJugador", config.openOncePerPlayer);
-        root.addProperty("permisoRequerido", config.requiredPermission == null ? "" : config.requiredPermission);
+        // ---- apertura
+        JsonObject opening = new JsonObject();
+        opening.addProperty("tiradasPorApertura", config.rolls);
+        opening.addProperty("cooldownSegundos", config.cooldownSeconds);
+        opening.addProperty("retrasoAperturaSegundos", round(config.openDelayTicks / 20.0));
+        opening.addProperty("permitirSaltar", config.allowSkip);
+        opening.addProperty("anuncioGlobal", config.broadcast);
+        opening.addProperty("soloUnaVezPorJugador", config.openOncePerPlayer);
+        opening.addProperty("permisoRequerido", config.requiredPermission == null ? "" : config.requiredPermission);
+        opening.addProperty("mostrarProbabilidades", config.showOdds);
+        root.add("apertura", opening);
 
-        root.addProperty("// PITY (garantia)", RULE);
-        root.addProperty("pityActivado", config.pityEnabled);
-        root.addProperty("pityIntervalo", config.pityInterval);
-        root.addProperty("pityRareza", (config.pityRarity == null ? Rarity.LEGENDARY : config.pityRarity).name());
+        // ---- pity
+        JsonObject pity = new JsonObject();
+        pity.addProperty("activado", config.pityEnabled);
+        pity.addProperty("cadaCuantasAperturas", config.pityInterval);
+        pity.addProperty("rarezaGarantizada", (config.pityRarity == null ? Rarity.LEGENDARY : config.pityRarity).name());
+        root.add("pity", pity);
 
-        root.addProperty("// PROBABILIDADES DE RAREZA", RULE);
+        // ---- probabilidades de rareza
         JsonObject chances = new JsonObject();
         for (Rarity rarity : Rarity.values()) {
-            chances.addProperty(rarity.name(), config.rarityChance(rarity));
+            chances.addProperty(rarity.name(), round(config.rarityChance(rarity)));
         }
-        root.add("probabilidadRareza", chances);
+        root.add("probabilidadPorRareza", chances);
 
-        root.addProperty("// MOSTRAR ODDS EN POOL", RULE);
-        root.addProperty("mostrarProbabilidades", config.showOdds);
+        // ---- media
+        JsonObject media = new JsonObject();
+        JsonArray videos = new JsonArray();
+        config.videos.forEach(videos::add);
+        media.add("videos", videos);
+        JsonArray music = new JsonArray();
+        config.music.forEach(music::add);
+        media.add("musica", music);
+        root.add("media", media);
 
-        root.addProperty("// RECOMPENSAS (solo tipo ITEM)", RULE);
+        // ---- recompensas
         JsonArray rewards = new JsonArray();
         JsonArray advanced = new JsonArray();
         for (RewardEntry entry : config.rewards) {
             if (entry.type == RewardEntry.Type.ITEM) {
                 rewards.add(rewardToJson(entry));
             } else {
-                // Tipos no editables en JSON: se conservan en crudo.
+                // Tipos no editables en JSON: se conservan en crudo para no perderlos.
                 advanced.add(entry.save().toString());
             }
         }
         root.add("recompensas", rewards);
         if (!advanced.isEmpty()) {
-            root.addProperty("// RECOMPENSAS AVANZADAS", "No editar a mano: COMMAND/XP/EFFECT/KEY se configuran en el editor in-game.");
             root.add("recompensasAvanzadas", advanced);
         }
 
-        root.addProperty("// MEDIA (pantalla de pre-apertura)", "Links directos. El video debe ser MP4 (H.264); WEBM no se puede reproducir.");
-        JsonArray videos = new JsonArray();
-        config.videos.forEach(videos::add);
-        root.add("videos", videos);
-        JsonArray music = new JsonArray();
-        config.music.forEach(music::add);
-        root.add("musica", music);
-
         return root;
+    }
+
+    /** Bloque de ayuda que se escribe dentro del propio archivo. */
+    private static JsonObject helpBlock() {
+        JsonObject help = new JsonObject();
+        help.addProperty("queEsEsto", "Configuracion de una caja de Fantastic Crates. Editala y aplica con /fscrate reload");
+        help.addProperty("rarezas", "COMMON, RARE, EPIC, LEGENDARY, MYTHIC");
+        help.addProperty("colores", "Usa & o el caracter de seccion para colores. Ejemplo: &d&lCaja Epica");
+        help.addProperty("idsDeItems", "Consulta la lista completa en config/fscrates/items_referencia.json");
+        help.addProperty("recompensas", "Aqui solo se pueden definir las de tipo ITEM. Las de COMMAND, XP, EFFECT y KEY se configuran en el editor del juego.");
+        help.addProperty("probabilidad", "Es un peso relativo dentro de su rareza, no un porcentaje absoluto. El % real se calcula solo.");
+        help.addProperty("garantizada", "Si es true la recompensa se entrega SIEMPRE, ademas de las que salgan por sorteo.");
+        help.addProperty("videos", "Links directos a MP4 con video H.264. Los .webm NO se pueden reproducir.");
+        help.addProperty("musica", "Links directos a MP3, OGG o WAV.");
+        return help;
+    }
+
+    /** Redondea a 3 decimales para que el archivo no salga con 0.30000000000000004. */
+    private static double round(double value) {
+        return Math.round(value * 1000.0) / 1000.0;
     }
 
     private static JsonObject rewardToJson(RewardEntry entry) {
@@ -468,6 +533,17 @@ public final class JsonCrateLoader {
     }
 
     // ------------------------------------------------------------------- helpers
+
+    /**
+     * Devuelve una seccion del JSON. Si no existe devuelve el propio objeto
+     * padre, para que los archivos del formato plano antiguo sigan funcionando.
+     */
+    private static JsonObject section(JsonObject json, String name) {
+        if (json.has(name) && json.get(name).isJsonObject()) {
+            return json.getAsJsonObject(name);
+        }
+        return json;
+    }
 
     private static String string(JsonObject json, String key, String fallback) {
         try {

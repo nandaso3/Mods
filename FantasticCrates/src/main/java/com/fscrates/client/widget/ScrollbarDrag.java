@@ -1,18 +1,27 @@
 package com.fscrates.client.widget;
 
 /**
- * Estado y geometria del arrastre de la barra de scroll con click derecho.
+ * Estado y geometria del arrastre de la barra de scroll.
  *
  * Se comparte entre todos los scrollbars dibujados a mano (ScrollSelector,
- * CratePoolScreen, ...) para no repetir el calculo del thumb en cada pantalla.
+ * CratePoolScreen, CrateEditorScreen, NbtEditorScreen) para no repetir el
+ * calculo del thumb en cada pantalla.
+ *
+ * Funciona con click IZQUIERDO y con click derecho, y ademas se puede hacer
+ * click en cualquier punto de la barra para saltar directamente ahi.
  */
 public final class ScrollbarDrag {
     /** Alto minimo del thumb en pixeles. */
-    public static final int MIN_THUMB = 10;
+    public static final int MIN_THUMB = 12;
 
     private boolean dragging;
     private double anchorMouseY;
     private int anchorScroll;
+
+    /** Botones validos para arrastrar: izquierdo (0) y derecho (1). */
+    public static boolean isDragButton(int button) {
+        return button == 0 || button == 1;
+    }
 
     /** Alto del thumb segun cuantas filas se ven de cuantas hay. */
     public static int thumbHeight(int trackHeight, int visibleRows, int totalRows) {
@@ -34,11 +43,38 @@ public final class ScrollbarDrag {
         return mouseX >= barX && mouseX <= barX + barWidth && mouseY >= thumbTop && mouseY <= thumbTop + thumbHeight;
     }
 
-    /** Empieza a arrastrar guardando el punto de anclaje. */
-    public void begin(double mouseY, int currentScroll) {
+    /** Toda la barra, no solo el thumb (con un par de pixeles de margen para acertar mejor). */
+    public static boolean overTrack(double mouseX, double mouseY, int barX, int barWidth, int trackTop, int trackHeight) {
+        return mouseX >= barX - 2
+            && mouseX <= barX + barWidth + 2
+            && mouseY >= trackTop
+            && mouseY <= trackTop + trackHeight;
+    }
+
+    /**
+     * Empieza a arrastrar. Si el click cae fuera del thumb, primero salta a esa
+     * posicion (centrando el thumb en el cursor) y luego sigue arrastrando desde ahi.
+     *
+     * @return el scroll que hay que aplicar
+     */
+    public int beginOnTrack(double mouseY, int currentScroll, int trackTop, int trackHeight, int thumbHeight, int maxScroll) {
+        int scroll = currentScroll;
+        int thumb = thumbTop(trackTop, trackHeight, thumbHeight, currentScroll, maxScroll);
+
+        boolean onThumb = mouseY >= thumb && mouseY <= thumb + thumbHeight;
+        if (!onThumb) {
+            int usable = trackHeight - thumbHeight;
+            if (usable > 0 && maxScroll > 0) {
+                double target = mouseY - trackTop - thumbHeight / 2.0;
+                scroll = (int) Math.round(target * maxScroll / usable);
+                scroll = Math.max(0, Math.min(maxScroll, scroll));
+            }
+        }
+
         this.dragging = true;
         this.anchorMouseY = mouseY;
-        this.anchorScroll = currentScroll;
+        this.anchorScroll = scroll;
+        return scroll;
     }
 
     /** Devuelve el scroll nuevo mientras se arrastra. */
