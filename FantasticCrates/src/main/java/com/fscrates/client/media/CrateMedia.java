@@ -59,17 +59,23 @@ public final class CrateMedia {
         // que llega el suyo, para no colar el del mod ni un instante.
         usingDefaults = !customVideo;
 
+        // Se registra el url exacto que se va a usar. Si algo no carga, esta
+        // linea distingue las dos causas posibles de un tiron: que la caja no
+        // tenga guardada la media (aqui saldria "la del mod" aunque la hubieras
+        // puesto) o que falle la descarga (aqui sale tu url y el fallo despues).
+        String chosenVideo = customVideo ? pick(videoUrls) : null;
+        String chosenMusic = customMusic ? pick(musicUrls) : null;
         FSCrates.LOGGER.info(
-            "[FSCrates] Media de la escena: video {}, musica {}.",
-            customVideo ? videoUrls.size() + " propio(s)" : "el del mod",
-            customMusic ? musicUrls.size() + " propia(s)" : "la del mod"
+            "[FSCrates] Media de la escena -> video: {} | musica: {}",
+            chosenVideo == null ? "la del mod (la caja no tiene ninguno configurado)" : chosenVideo,
+            chosenMusic == null ? "la del mod (la caja no tiene ninguna configurada)" : chosenMusic
         );
 
-        videoFuture = customVideo
-            ? MediaCache.obtain(pick(videoUrls), MediaCache.Kind.VIDEO)
+        videoFuture = chosenVideo != null
+            ? MediaCache.obtain(chosenVideo, MediaCache.Kind.VIDEO)
             : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.videos()));
-        musicFuture = customMusic
-            ? MediaCache.obtain(pick(musicUrls), MediaCache.Kind.MUSIC)
+        musicFuture = chosenMusic != null
+            ? MediaCache.obtain(chosenMusic, MediaCache.Kind.MUSIC)
             : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.music()));
     }
 
@@ -104,10 +110,29 @@ public final class CrateMedia {
             Path file = future.getNow(null);
             if (file == null) {
                 FSCrates.LOGGER.warn("[FSCrates] No hay {} disponible para la pantalla de pre-apertura.", what);
+                return null;
+            }
+
+            // Se deja constancia de QUE archivo se va a usar. Cuando algo no
+            // carga, esta linea es la que dice si el problema es la descarga, el
+            // archivo o el reproductor.
+            try {
+                FSCrates.LOGGER.info(
+                    "[FSCrates] {} lista: {} ({} bytes, {}).",
+                    what,
+                    file.getFileName(),
+                    java.nio.file.Files.size(file),
+                    MediaCache.sniff(file)
+                );
+            } catch (Exception ignored) {
+                FSCrates.LOGGER.info("[FSCrates] {} lista: {}.", what, file.getFileName());
             }
             return file;
         } catch (Exception e) {
-            FSCrates.LOGGER.error("[FSCrates] Fallo al preparar la {}: {}", what, e.toString());
+            // La causa real es la que dice por que fallo la descarga; el envoltorio
+            // de CompletableFuture no aporta nada.
+            Throwable cause = e.getCause() != null ? e.getCause() : e;
+            FSCrates.LOGGER.error("[FSCrates] Fallo al preparar la {}: {}", what, cause.getMessage() == null ? cause.toString() : cause.getMessage());
             return null;
         }
     }

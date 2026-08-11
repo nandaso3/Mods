@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.List;
 import java.util.Locale;
@@ -112,7 +113,7 @@ public final class MediaCache {
 
         String prefix = hash(url.trim());
         Path exact = cacheFileFor(url.trim(), kind);
-        if (isReady(exact)) {
+        if (isUsable(exact, kind)) {
             return exact;
         }
 
@@ -120,24 +121,90 @@ public final class MediaCache {
         if (!Files.isDirectory(folder)) {
             return null;
         }
+
+        // Se juntan primero los candidatos de este url y luego se separan los que
+        // sirven de los que no: los que no se borran para que el proximo intento
+        // los descargue otra vez en vez de tropezar con ellos.
+        List<Path> candidates;
         try (Stream<Path> files = Files.list(folder)) {
-            return files
+            candidates = files
                 .filter(p -> p.getFileName().toString().startsWith(prefix + "."))
                 .filter(p -> !p.getFileName().toString().endsWith(".part"))
-                .filter(MediaCache::isReady)
-                .findFirst()
-                .orElse(null);
+                .collect(Collectors.toList());
         } catch (IOException e) {
             return null;
         }
+
+        Path good = null;
+        for (Path candidate : candidates) {
+            if (isUsable(candidate, kind)) {
+                if (good == null) {
+                    good = candidate;
+                }
+            } else {
+                discard(candidate, kind);
+            }
+        }
+        return good;
     }
 
-    /** Un archivo en cache es valido si existe y tiene tamano &gt; 0. */
+    /**
+     * Un archivo sirve si existe, no esta vacio y su CONTENIDO es media
+     * reconocible.
+     *
+     * Antes bastaba con que existiera y pesara algo, y eso era un problema gordo:
+     * si una descarga guardaba una pagina de error de Google Drive ("supera la
+     * cuota", "no se puede previsualizar") o se quedaba a medias, ese archivo
+     * contaba como valido y se reutilizaba PARA SIEMPRE, porque al estar en cache
+     * ya no se volvia a descargar. El resultado era una crate que no cargaba su
+     * media y que no se arreglaba ni reiniciando ni actualizando el mod, porque la
+     * basura seguia en disco.
+     *
+     * Mirar los primeros bytes cuesta nada y corta el problema de raiz.
+     */
     public static boolean isReady(Path file) {
         try {
-            return file != null && Files.isRegularFile(file) && Files.size(file) > 0L;
+            if (file == null || !Files.isRegularFile(file) || Files.size(file) <= 0L) {
+                return false;
+            }
+            return sniff(file) != MediaType.UNKNOWN;
         } catch (IOException e) {
             return false;
+        }
+    }
+
+    /** Como isReady, pero exigiendo ademas que encaje con la ranura. */
+    public static boolean isUsable(Path file, Kind kind) {
+        try {
+            if (file == null || !Files.isRegularFile(file) || Files.size(file) <= 0L) {
+                return false;
+            }
+            return sniff(file).matches(kind);
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Tira un archivo de cache que no sirve, para que se vuelva a descargar.
+     *
+     * Sin esto un archivo corrupto se queda ahi ocupando sitio y tapando el
+     * intento siguiente.
+     */
+    private static void discard(Path file, Kind kind) {
+        try {
+            long size = Files.size(file);
+            MediaType type = sniff(file);
+            Files.deleteIfExists(file);
+            FSCrates.LOGGER.warn(
+                "[FSCrates] Se descarta '{}' de la cache: {} bytes y el contenido no es media valida para {} ({}). Se volvera a descargar.",
+                file.getFileName(),
+                size,
+                kind == Kind.VIDEO ? "video/imagen" : "musica",
+                type == MediaType.UNKNOWN ? "tipo no reconocido" : "es " + type
+            );
+        } catch (IOException e) {
+            FSCrates.LOGGER.warn("[FSCrates] No se pudo borrar el archivo invalido '{}': {}", file, e.toString());
         }
     }
 
@@ -212,6 +279,31 @@ public final class MediaCache {
 
         // La extension real se decide por el contenido, no por el url.
         MediaType type = sniff(part);
+
+        // Lo que no sea media reconocible NO se guarda. Antes se guardaba igual y
+        // quedaba en cache tapando los intentos siguientes.
+        if (type == MediaType.UNKNOWN) {
+            long size = Files.size(part);
+            boolean html = looksLikeHtml(part);
+            Files.deleteIfExists(part);
+            throw new IOException(html
+                ? "el enlace devolvio una pagina web (" + size + " bytes), no un archivo. "
+                    + "Suele ser un enlace de 'ver' en vez de descarga directa, o que Drive pide confirmacion "
+                    + "por cuota superada. Comparte el archivo como 'cualquier persona con el enlace'"
+                : "lo descargado (" + size + " bytes) no es un formato reconocible: "
+                    + "tiene que ser MP4/MOV/M4V, PNG/JPG/GIF o MP3/OGG/WAV");
+        }
+
+        // Y si es media pero de la clase equivocada, se dice claramente: es el
+        // fallo tipico de pegar el enlace en la pestaña que no toca.
+        if (!type.matches(kindOf(target))) {
+            Files.deleteIfExists(part);
+            throw new IOException("el archivo es " + type + " y no encaja en esta pestaña: "
+                + (type.isVisual()
+                    ? "los videos e imagenes van en la pestaña Videos"
+                    : "la musica va en la pestaña Musica"));
+        }
+
         Path finalTarget = target;
         if (type != MediaType.UNKNOWN && !target.getFileName().toString().endsWith(type.extension())) {
             String name = target.getFileName().toString();
@@ -222,6 +314,36 @@ public final class MediaCache {
 
         Files.move(part, finalTarget, StandardCopyOption.REPLACE_EXISTING);
         return finalTarget;
+    }
+
+    /** De que ranura es un archivo, deducido de la carpeta donde va. */
+    private static Kind kindOf(Path target) {
+        Path parent = target.getParent();
+        String folder = parent == null ? "" : parent.getFileName().toString();
+        return Kind.MUSIC.folder().equals(folder) ? Kind.MUSIC : Kind.VIDEO;
+    }
+
+    /**
+     * true si lo descargado parece una pagina web.
+     *
+     * Es el caso mas habitual cuando un enlace no es de descarga directa, y
+     * merece un mensaje propio porque la solucion es distinta.
+     */
+    private static boolean looksLikeHtml(Path file) {
+        try (InputStream in = Files.newInputStream(file)) {
+            byte[] head = new byte[256];
+            int n = in.read(head);
+            if (n <= 0) {
+                return false;
+            }
+            String text = new String(head, 0, n, java.nio.charset.StandardCharsets.ISO_8859_1)
+                .trim()
+                .toLowerCase(Locale.ROOT);
+            return text.startsWith("<!doctype") || text.startsWith("<html") || text.contains("<head")
+                || text.contains("<title") || text.startsWith("<?xml");
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
@@ -387,6 +509,20 @@ public final class MediaCache {
 
         public boolean isImage() {
             return this == PNG || this == JPEG || this == GIF;
+        }
+
+        /**
+         * true si este archivo sirve para la ranura indicada.
+         *
+         * En la de video valen videos e imagenes; en la de musica, solo audio.
+         * Sirve para avisar cuando un enlace se ha pegado en la pestaña que no
+         * le toca, que si no se queda en un fallo silencioso.
+         */
+        public boolean matches(Kind kind) {
+            if (this == UNKNOWN) {
+                return false;
+            }
+            return kind == Kind.VIDEO ? this.visual : !this.visual;
         }
     }
 
