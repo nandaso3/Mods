@@ -3,6 +3,10 @@ package com.fscrates.client.screen;
 import com.fscrates.animation.AnimationRegistry;
 import com.fscrates.animation.CrateAnimation;
 import com.fscrates.client.RegistryLists;
+import com.fscrates.client.color.FSColorPickerScreen;
+import com.fscrates.client.color.FSRainbow;
+import com.fscrates.client.color.FSRainbowPickerScreen;
+import com.fscrates.client.color.FSText;
 import com.fscrates.client.color.FSTextStyleScreen;
 import com.fscrates.client.media.MediaCache;
 import com.fscrates.client.render.CrateStyles;
@@ -236,9 +240,9 @@ public class CrateEditorScreen extends Screen {
         int third = (w - 8) / 3;
         boolean has = this.selectedSceneLine != null;
         this.addRenderableWidget(
-            Button.builder(Component.literal(has ? "\u00a7bEstilo" : "\u00a78Estilo"), b -> {
+            Button.builder(Component.literal(has ? "\u00a7bColor" : "\u00a78Color"), b -> {
                 if (this.selectedSceneLine != null) {
-                    this.openStyleEditor(this.selectedSceneLine, styled -> {
+                    this.openColorPicker(this.selectedSceneLine, styled -> {
                         int index = this.config.sceneLines.indexOf(this.selectedSceneLine);
                         if (index >= 0) {
                             this.config.sceneLines.set(index, styled);
@@ -251,12 +255,13 @@ public class CrateEditorScreen extends Screen {
         this.addRenderableWidget(
             Button.builder(Component.literal(has ? "\u00a7d\u2726 Arcoiris" : "\u00a78\u2726 Arcoiris"), b -> {
                 if (this.selectedSceneLine != null) {
-                    int index = this.config.sceneLines.indexOf(this.selectedSceneLine);
-                    if (index >= 0) {
-                        this.config.sceneLines.set(index, toggleRainbow(this.selectedSceneLine));
-                        this.selectedSceneLine = this.config.sceneLines.get(index);
-                        this.rebuildWidgets();
-                    }
+                    this.openRainbowPicker(this.selectedSceneLine, styled -> {
+                        int index = this.config.sceneLines.indexOf(this.selectedSceneLine);
+                        if (index >= 0) {
+                            this.config.sceneLines.set(index, styled);
+                            this.selectedSceneLine = styled;
+                        }
+                    });
                 }
             }).bounds(x + third + 4, y, third, 16).build()
         );
@@ -272,7 +277,7 @@ public class CrateEditorScreen extends Screen {
     }
 
     /**
-     * Campo de texto con un boton de estilo al lado.
+     * Campo de texto con boton de color y boton de arcoiris al lado.
      *
      * @return cuanto ha avanzado el cursor vertical
      */
@@ -284,67 +289,64 @@ public class CrateEditorScreen extends Screen {
         box.setResponder(setter);
         this.addRenderableWidget(box);
 
+        int half = (fxW - 2) / 2;
+
+        // Color exacto (rueda + RGB + hex + paleta)
         this.addRenderableWidget(
-            Button.builder(Component.literal("\u00a7bEstilo"), b -> this.openStyleEditor(box.getValue(), styled -> {
+            Button.builder(Component.literal("\u00a7b\u25a0"), b -> this.openColorPicker(box.getValue(), styled -> {
                 box.setValue(styled);
                 setter.accept(styled);
-            })).bounds(x + fieldW + 4, y, fxW, 16).build()
+            })).bounds(x + fieldW + 4, y, half, 16).build()
         );
+        this.tooltipZones.add(new CrateEditorScreen.TooltipZone(x + fieldW + 4, y, half, 16, desc(
+            "\u00a7bColor exacto",
+            "\u00a77Rueda de tono, deslizadores RGB, hexadecimal",
+            "\u00a77y la paleta de los 16 colores clasicos."
+        )));
+
+        // Arcoiris (131 estilos)
+        this.addRenderableWidget(
+            Button.builder(Component.literal("\u00a7d\u2726"), b -> this.openRainbowPicker(box.getValue(), styled -> {
+                box.setValue(styled);
+                setter.accept(styled);
+            })).bounds(x + fieldW + 6 + half, y, fxW - half - 2, 16).build()
+        );
+        this.tooltipZones.add(new CrateEditorScreen.TooltipZone(x + fieldW + 6 + half, y, fxW - half - 2, 16, desc(
+            "\u00a7d\u2726 Arcoiris",
+            "\u00a77" + FSRainbow.count() + " estilos animados con vista previa."
+        )));
 
         return 20;
     }
 
     /**
-     * Abre el editor de color/estilo del mod y devuelve el texto ya formateado.
-     * Se conserva el texto plano y se le pone delante el color en hexadecimal,
-     * para poder usar cualquier RGB y no solo los 16 codigos clasicos.
+     * Abre el selector de color y devuelve el texto con el color delante en
+     * hexadecimal, asi se puede usar cualquier RGB y no solo los 16 clasicos.
      */
-    private void openStyleEditor(String current, Consumer<String> result) {
-        String plain = stripCodes(current == null ? "" : current);
+    private void openColorPicker(String current, Consumer<String> result) {
+        String plain = FSText.plain(current == null ? "" : current);
         int initial = colorOf(current == null ? "" : current);
-        boolean[] flags = flagsOf(current == null ? "" : current);
 
         this.minecraft.setScreen(
-            new FSTextStyleScreen(
-                "Estilo del mensaje",
-                plain.isEmpty() ? "Texto de ejemplo" : plain,
+            new FSColorPickerScreen(
+                "Color del mensaje",
                 initial,
-                flags,
-                (rgb, bold, italic, underline, strike, obf) -> {
-                    StringBuilder sb = new StringBuilder();
-                    sb.append(String.format("&#%06X", rgb & 0xFFFFFF));
-                    if (bold) {
-                        sb.append("&l");
-                    }
-                    if (italic) {
-                        sb.append("&o");
-                    }
-                    if (underline) {
-                        sb.append("&n");
-                    }
-                    if (strike) {
-                        sb.append("&m");
-                    }
-                    if (obf) {
-                        sb.append("&k");
-                    }
-                    sb.append(plain);
-                    result.accept(sb.toString());
-                },
+                rgb -> result.accept(String.format("&#%06X", rgb & 0xFFFFFF) + plain),
                 () -> this.minecraft.setScreen(this)
             )
         );
     }
 
-    /** Pone o quita la etiqueta de arcoiris de una linea. */
-    private static String toggleRainbow(String line) {
-        if (line == null) {
-            return "";
-        }
-        if (line.toLowerCase(Locale.ROOT).startsWith("<rainbow>")) {
-            return line.substring("<rainbow>".length());
-        }
-        return "<rainbow>" + stripCodes(line);
+    /** Abre el selector de arcoiris con vista previa animada de cada estilo. */
+    private void openRainbowPicker(String current, Consumer<String> result) {
+        int style = FSText.rainbowStyleOf(current == null ? "" : current);
+        this.minecraft.setScreen(
+            new FSRainbowPickerScreen(
+                Math.max(0, style),
+                picked -> result.accept(FSText.withRainbow(current, picked)),
+                () -> this.minecraft.setScreen(this)
+            )
+        );
     }
 
     private int bodyX() {

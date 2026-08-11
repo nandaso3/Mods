@@ -48,7 +48,57 @@ public final class FSText {
             return false;
         }
         String lower = raw.toLowerCase(Locale.ROOT);
-        return lower.contains("<rainbow>") || lower.contains("<gradient:") || lower.contains("&#");
+        return lower.contains("<rainbow") || lower.contains("<gradient:") || lower.contains("&#");
+    }
+
+    /** Estilo de arcoiris de un texto, o -1 si no lleva arcoiris. */
+    public static int rainbowStyleOf(String raw) {
+        if (raw == null) {
+            return -1;
+        }
+        String lower = raw.toLowerCase(Locale.ROOT);
+        int at = lower.indexOf("<rainbow");
+        if (at < 0) {
+            return -1;
+        }
+        int close = lower.indexOf('>', at);
+        if (close < 0) {
+            return -1;
+        }
+        String tag = lower.substring(at + 1, close);
+        if (tag.startsWith("rainbow:")) {
+            try {
+                return Integer.parseInt(tag.substring("rainbow:".length()).trim());
+            } catch (NumberFormatException ignored) {
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    /** Quita las etiquetas de efecto y los codigos de color, dejando el texto pelado. */
+    public static String plain(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replaceAll("(?i)<\\/?rainbow(:\\d+)?>", "")
+            .replaceAll("(?i)<\\/?gradient(:[^>]*)?>", "")
+            .replaceAll("[&\u00a7]#[0-9a-fA-F]{6}", "")
+            .replaceAll("[&\u00a7][0-9A-Fa-fK-Ok-orR]", "");
+    }
+
+    /** Pone (o cambia) el arcoiris de un texto, respetando el texto escrito. */
+    public static String withRainbow(String raw, int style) {
+        String plain = plain(raw);
+        return "<rainbow:" + Math.max(0, style) + ">" + plain;
+    }
+
+    /** Quita el arcoiris dejando el texto tal cual. */
+    public static String withoutRainbow(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        return raw.replaceAll("(?i)<\\/?rainbow(:\\d+)?>", "");
     }
 
     /**
@@ -75,6 +125,7 @@ public final class FSText {
         int effect = 0;
         int gradientFrom = 0xFFFFFF;
         int gradientTo = 0xFFFFFF;
+        int rainbowStyle = 0;
 
         // Para repartir el efecto se necesita saber cuantas letras quedan.
         int effectIndex = 0;
@@ -90,8 +141,17 @@ public final class FSText {
                 int close = raw.indexOf('>', i);
                 if (close > i) {
                     String tag = raw.substring(i + 1, close).toLowerCase(Locale.ROOT);
-                    if (tag.equals("rainbow")) {
+                    if (tag.equals("rainbow") || tag.startsWith("rainbow:")) {
                         effect = 1;
+                        // <rainbow:N> elige uno de los estilos de paleta; <rainbow> es el clasico.
+                        rainbowStyle = 0;
+                        if (tag.startsWith("rainbow:")) {
+                            try {
+                                rainbowStyle = Integer.parseInt(tag.substring("rainbow:".length()).trim());
+                            } catch (NumberFormatException ignored) {
+                                rainbowStyle = 0;
+                            }
+                        }
                         effectIndex = 0;
                         effectLength = Math.max(1, visibleLength(raw, close + 1));
                         i = close + 1;
@@ -173,8 +233,9 @@ public final class FSText {
             // --- caracter normal
             int color;
             if (effect == 1) {
-                float hue = (effectIndex / (float) effectLength) * RAINBOW_SPREAD + (timeMs / 1000.0F) * RAINBOW_SPEED;
-                color = hsvToRgb(hue - (float) Math.floor(hue), 0.85F, 1.0F);
+                float pos = (effectIndex / (float) effectLength) * RAINBOW_SPREAD;
+                float time = (timeMs % 3000L) / 3000.0F;
+                color = FSRainbow.color(rainbowStyle, pos, time);
                 effectIndex++;
             } else if (effect == 2) {
                 float t = effectLength <= 1 ? 0.0F : effectIndex / (float) (effectLength - 1);

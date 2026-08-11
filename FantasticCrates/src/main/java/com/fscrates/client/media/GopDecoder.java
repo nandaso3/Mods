@@ -12,6 +12,7 @@ import org.jcodec.api.FrameGrab;
 import org.jcodec.api.PictureWithMetadata;
 import org.jcodec.common.DemuxerTrackMeta;
 import org.jcodec.common.io.NIOUtils;
+import org.jcodec.common.io.SeekableByteChannel;
 import org.jcodec.common.model.Picture;
 
 /**
@@ -69,6 +70,8 @@ final class GopDecoder implements AutoCloseable {
     private volatile boolean stopped;
     private volatile Throwable failure;
     private Thread[] workers;
+    /** Hilos que ya acabaron su parte, para saber si queda algo por llegar. */
+    private int finishedWorkers;
 
     private GopDecoder(Path file, int workerCount, int[] keyFrames, int totalFrames) {
         this.file = file;
@@ -115,6 +118,20 @@ final class GopDecoder implements AutoCloseable {
                 return null;
             }
             int pixels = first.getCroppedWidth() * first.getCroppedHeight();
+
+            // Aviso honesto: por encima de 1440p la decodificacion en Java puro no
+            // da para tiempo real ni repartiendola entre hilos.
+            if (pixels > 2_700_000) {
+                FSCrates.LOGGER.warn(
+                    "[FSCrates] El video '{}' es de {}x{} ({} Mpx). Se reproducira, pero a saltos: "
+                        + "decodificar en Java puro no llega a tanto. Recomendado 1280x720 o 1920x1080.",
+                    file.getFileName(),
+                    first.getCroppedWidth(),
+                    first.getCroppedHeight(),
+                    String.format("%.1f", pixels / 1_000_000.0)
+                );
+            }
+
             if (pixels < PARALLEL_PIXEL_THRESHOLD) {
                 FSCrates.LOGGER.info(
                     "[FSCrates] Video '{}' ({} px): un solo hilo de decodificado (va sobrado).",
@@ -163,21 +180,23 @@ final class GopDecoder implements AutoCloseable {
     }
 
     private void runWorker() {
-        FrameGrab grab = null;
+        SeekableByteChannel channel = null;
         try {
-            grab = FrameGrab.createFrameGrab(NIOUtils.readableChannel(this.file.toFile()));
+            channel = NIOUtils.readableChannel(this.file.toFile());
+            FrameGrab grab = FrameGrab.createFrameGrab(channel);
 
             while (!this.stopped) {
                 int gop = this.nextGop.getAndIncrement();
                 if (gop >= this.keyFrames.length) {
-                    // Fin del video: se reparten otra vez desde el principio para
-                    // el bucle. Solo el hilo que llega justo al limite reinicia.
-                    synchronized (this.lock) {
-                        if (this.nextGop.get() >= this.keyFrames.length) {
-                            this.nextGop.set(0);
-                        }
-                    }
-                    continue;
+                    // Se acabo el archivo: este hilo termina. El bucle del video lo
+                    // lleva el reproductor creando un decodificador nuevo.
+                    //
+                    // Antes se reiniciaba el reparto aqui mismo, mezclando el
+                    // indice absoluto de fotograma con un flujo que da la vuelta, y
+                    // eso bloqueaba: un hilo se quedaba esperando sitio para
+                    // publicar un fotograma del final mientras el contador de
+                    // entrega ya habia vuelto a cero.
+                    return;
                 }
 
                 int from = this.gopStart(gop);
@@ -227,7 +246,13 @@ final class GopDecoder implements AutoCloseable {
                 }
             }
         } finally {
-            closeQuietly(grab);
+            synchronized (this.lock) {
+                this.finishedWorkers++;
+                this.lock.notifyAll();
+            }
+            // El canal hay que cerrarlo a mano: es Closeable y si no se fugan
+            // descriptores de archivo.
+            NIOUtils.closeQuietly(channel);
         }
     }
 
@@ -245,6 +270,7 @@ final class GopDecoder implements AutoCloseable {
             // para no pasarse del techo de memoria (un fotograma 1440p en YUV son
             // unos 5,5 MB, asi que 24 en vuelo serian 132 MB).
             if (!this.windowAdjusted) {
+                // marcador para el bloque de ajuste de abajo
                 this.windowAdjusted = true;
                 long frameBytes = (long) w * h * 3L / 2L;
                 int allowed = (int) Math.max(12L, Math.min(this.window, FRAME_BUDGET_BYTES / Math.max(1L, frameBytes)));
@@ -257,7 +283,13 @@ final class GopDecoder implements AutoCloseable {
                 }
             }
 
-            while (!this.stopped && (this.pending.size() >= this.window || index > this.nextToEmit + this.window)) {
+            // OJO: la espera SOLO puede depender de la posicion de ESTE fotograma.
+            // Antes tambien se miraba pending.size() >= window, y eso provocaba un
+            // bloqueo mutuo: si un hilo iba adelantado y llenaba la cola, el hilo
+            // que tenia justo el fotograma que toca entregar se quedaba esperando
+            // sitio, y take() esperaba ese fotograma para siempre.
+            // El tamano de la cola ya queda acotado por esta misma condicion.
+            while (!this.stopped && index > this.nextToEmit + this.window) {
                 this.lock.wait(50L);
             }
             if (this.stopped) {
@@ -304,6 +336,10 @@ final class GopDecoder implements AutoCloseable {
      * Devuelve el siguiente fotograma en ORDEN de reproduccion, esperando si
      * hace falta. Devuelve null si se paro o si fallo la decodificacion.
      */
+    /**
+     * Devuelve el siguiente fotograma en ORDEN de reproduccion, esperando si hace
+     * falta. Devuelve null al terminar el archivo, si se paro o si algo fallo.
+     */
     YuvFrame take() throws InterruptedException {
         synchronized (this.lock) {
             while (!this.stopped) {
@@ -311,22 +347,35 @@ final class GopDecoder implements AutoCloseable {
                     return null;
                 }
 
+                // Ya se entregaron todos: fin del archivo.
+                if (this.nextToEmit >= this.totalFrames) {
+                    return null;
+                }
+
                 YuvFrame frame = this.pending.remove(this.nextToEmit);
                 if (frame != null) {
                     this.nextToEmit++;
-                    // Al terminar la vuelta se vuelve a empezar (bucle continuo).
-                    if (this.nextToEmit >= this.totalFrames) {
-                        this.nextToEmit = 0;
-                        this.pending.clear();
-                    }
                     this.lock.notifyAll();
                     return frame;
+                }
+
+                // Si no queda nadie decodificando y el fotograma no esta, no va a
+                // llegar nunca: se corta en vez de esperar para siempre.
+                if (this.finishedWorkers >= this.workerCount && this.pending.isEmpty()) {
+                    return null;
                 }
 
                 this.lock.wait(100L);
             }
         }
         return null;
+    }
+
+    /** true si ya se entrego el archivo entero. */
+    boolean reachedEnd() {
+        synchronized (this.lock) {
+            return this.nextToEmit >= this.totalFrames;
+        }
     }
 
     /** Devuelve el objeto al pool para reutilizarlo. */

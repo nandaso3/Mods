@@ -24,6 +24,7 @@ import net.minecraft.resources.ResourceLocation;
 import org.jcodec.api.FrameGrab;
 import org.jcodec.api.PictureWithMetadata;
 import org.jcodec.common.io.NIOUtils;
+import org.jcodec.common.io.SeekableByteChannel;
 import org.jcodec.common.model.Picture;
 import org.lwjgl.system.MemoryUtil;
 
@@ -332,7 +333,8 @@ public final class VideoPlayer implements AutoCloseable {
      * Decodificado en paralelo por GOPs. Es bastante mas rapido que un solo hilo
      * (JCodec decodifica con uno solo), que es lo que permite 1080p a 30 fps.
      */
-    private void runParallelVideo(GopDecoder decoder) {
+    private void runParallelVideo(GopDecoder first) {
+        GopDecoder decoder = first;
         this.gopDecoder = decoder;
         try {
             decoder.start();
@@ -344,7 +346,26 @@ public final class VideoPlayer implements AutoCloseable {
                     if (failure != null) {
                         throw failure;
                     }
-                    return;
+
+                    // Fin del archivo: se cierra y se abre otro para dar la vuelta.
+                    // Es mas simple y robusto que reiniciar el reparto por dentro.
+                    boolean finished = decoder.reachedEnd();
+                    decoder.close();
+                    this.gopDecoder = null;
+                    if (this.stopped || !finished) {
+                        return;
+                    }
+
+                    GopDecoder next = GopDecoder.tryCreate(this.file);
+                    if (next == null) {
+                        // Si ya no se puede en paralelo, se sigue con un solo hilo.
+                        this.runVideo();
+                        return;
+                    }
+                    decoder = next;
+                    this.gopDecoder = decoder;
+                    decoder.start();
+                    continue;
                 }
 
                 RgbaFrame out = this.convertShared(
@@ -378,60 +399,82 @@ public final class VideoPlayer implements AutoCloseable {
         }
     }
 
+    /**
+     * Decodificado con un solo hilo.
+     *
+     * El archivo se abre UNA vez y para repetir se rebobina con seek. Antes se
+     * volvia a crear el FrameGrab en cada vuelta y el canal anterior no se
+     * cerraba nunca (SeekableByteChannel es Closeable): se acumulaban descriptores
+     * abiertos y al fallar la reapertura el video se quedaba congelado.
+     */
     private void runVideo() {
-        while (!this.stopped) {
-            FrameGrab grab = null;
-            PriorityQueue<YuvFrame> window = new PriorityQueue<>(
-                REORDER_WINDOW + 1,
-                Comparator.comparingDouble(f -> f.timestamp)
-            );
+        SeekableByteChannel channel = null;
+        PriorityQueue<YuvFrame> window = new PriorityQueue<>(
+            REORDER_WINDOW + 1,
+            Comparator.comparingDouble(f -> f.timestamp)
+        );
 
-            try {
-                grab = FrameGrab.createFrameGrab(NIOUtils.readableChannel(this.file.toFile()));
-                int emitted = 0;
+        try {
+            channel = NIOUtils.readableChannel(this.file.toFile());
+            FrameGrab grab = FrameGrab.createFrameGrab(channel);
+            long totalEmitted = 0L;
+            int emptyPasses = 0;
 
-                while (!this.stopped) {
-                    PictureWithMetadata meta = grab.getNativeFrameWithMetadata();
-                    if (meta == null || meta.getPicture() == null) {
-                        break;
-                    }
+            while (!this.stopped) {
+                PictureWithMetadata meta = grab.getNativeFrameWithMetadata();
 
-                    window.add(this.capture(meta));
-
-                    // La ventana llena garantiza que el minimo ya es el correcto.
-                    if (window.size() > REORDER_WINDOW) {
+                if (meta == null || meta.getPicture() == null) {
+                    // Fin del archivo: se vacia la ventana en orden...
+                    int flushed = 0;
+                    while (!this.stopped && !window.isEmpty()) {
                         if (!this.emit(window.poll())) {
                             return;
                         }
-                        emitted++;
+                        flushed++;
+                        totalEmitted++;
                     }
+
+                    if (totalEmitted == 0L) {
+                        throw new IllegalStateException("no se pudo decodificar ningun fotograma");
+                    }
+
+                    // Si dos vueltas seguidas no dan nada, algo va mal: mejor parar
+                    // que quedarse girando en vacio quemando CPU.
+                    emptyPasses = flushed == 0 ? emptyPasses + 1 : 0;
+                    if (emptyPasses >= 2) {
+                        FSCrates.LOGGER.warn(
+                            "[FSCrates] El video '{}' dejo de dar fotogramas; se detiene la reproduccion.",
+                            this.file.getFileName()
+                        );
+                        return;
+                    }
+
+                    // ...y se vuelve al principio SIN reabrir el archivo.
+                    grab.seekToFrameSloppy(0);
+                    continue;
                 }
 
-                // Fin del archivo: se vacia la ventana en orden.
-                while (!this.stopped && !window.isEmpty()) {
+                window.add(this.capture(meta));
+
+                // La ventana llena garantiza que el minimo ya es el correcto.
+                if (window.size() > REORDER_WINDOW) {
                     if (!this.emit(window.poll())) {
                         return;
                     }
-                    emitted++;
+                    totalEmitted++;
                 }
-
-                if (emitted == 0) {
-                    throw new IllegalStateException("no se pudo decodificar ningun fotograma");
-                }
-            } catch (Throwable t) {
-                FSCrates.LOGGER.error(
-                    "[FSCrates] No se pudo reproducir el video '{}': {}. Asegurate de que sea MP4 con video H.264.",
-                    this.file == null ? "?" : this.file.getFileName(),
-                    t.toString()
-                );
-                this.failed = true;
-                return;
-            } finally {
-                window.forEach(this::release);
-                window.clear();
-                closeQuietly(grab);
             }
-            // Vuelve a empezar: bucle continuo.
+        } catch (Throwable t) {
+            FSCrates.LOGGER.error(
+                "[FSCrates] No se pudo reproducir el video '{}': {}. Asegurate de que sea MP4 con video H.264.",
+                this.file == null ? "?" : this.file.getFileName(),
+                t.toString()
+            );
+            this.failed = true;
+        } finally {
+            window.forEach(this::release);
+            window.clear();
+            NIOUtils.closeQuietly(channel);
         }
     }
 

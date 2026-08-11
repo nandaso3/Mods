@@ -27,6 +27,21 @@ public final class FSColors {
         }
     }
 
+    /** Interpola entre dos colores RGB. */
+    public static int lerp(int from, int to, float t) {
+        t = Math.max(0.0F, Math.min(1.0F, t));
+        int fr = from >> 16 & 0xFF;
+        int fg = from >> 8 & 0xFF;
+        int fb = from & 0xFF;
+        int tr = to >> 16 & 0xFF;
+        int tg = to >> 8 & 0xFF;
+        int tb = to & 0xFF;
+        int r = Math.round(fr + (tr - fr) * t);
+        int g = Math.round(fg + (tg - fg) * t);
+        int b = Math.round(fb + (tb - fb) * t);
+        return r << 16 | g << 8 | b;
+    }
+
     public static int hsbToRgb(float h, float s, float b) {
         return 16777215 & Color.HSBtoRGB(h, s, b);
     }
