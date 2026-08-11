@@ -54,6 +54,18 @@ public class CratePoolScreen extends Screen {
      */
     private ItemStack detailStack = ItemStack.EMPTY;
 
+    /** Ancho que se le reserva a la ventana de detalles, o 0 si no cabe. */
+    private int detailWidth;
+
+    /** Ancho ideal de la ventana de detalles, incluido su relleno. */
+    private static final int DETAIL_WIDTH = 166;
+    /** Separacion entre la lista y la ventana. */
+    private static final int DETAIL_GAP = 6;
+    /** Por debajo de este ancho la ventana no se muestra. */
+    private static final int MIN_DETAIL_WIDTH = 104;
+    /** Hasta donde se puede estrechar la lista para hacerle sitio. */
+    private static final int MIN_PANEL_WIDTH = 240;
+
     /**
      * true si este item tiene algo que merezca la pena mostrar aparte.
      *
@@ -94,10 +106,35 @@ public class CratePoolScreen extends Screen {
 
     @Override
     protected void init() {
-        this.panelWidth = Math.min(this.width - 20, 330);
         this.panelHeight = Math.min(this.height - 20, 220);
-        this.leftPos = (this.width - this.panelWidth) / 2;
         this.topPos = (this.height - this.panelHeight) / 2;
+
+        // El sitio de la ventana de detalles se reserva AQUI, no al dibujarla.
+        //
+        // Antes se calculaba al vuelo: se intentaba a la derecha, luego a la
+        // izquierda y, si no cabia, se recortaba al borde de la pantalla. Y no cabe
+        // a ningun lado: con el panel de 330 centrado quedan unos 80 pixeles a cada
+        // lado y la ventana necesita 166. El recorte la dejaba encima del panel,
+        // tapando la lista.
+        //
+        // Ahora el panel y la ventana se colocan como un conjunto centrado, y si no
+        // hay hueco se estrecha el panel (hasta un minimo) antes de renunciar.
+        int panel = Math.min(this.width - 20, 330);
+        int reserve = Math.min(DETAIL_WIDTH, this.width - panel - DETAIL_GAP - 8);
+        if (reserve < DETAIL_WIDTH) {
+            int shrunk = Math.max(MIN_PANEL_WIDTH, this.width - DETAIL_GAP - 8 - DETAIL_WIDTH);
+            if (shrunk < panel) {
+                panel = shrunk;
+                reserve = Math.min(DETAIL_WIDTH, this.width - panel - DETAIL_GAP - 8);
+            }
+        }
+        // Por debajo de esto la ventana saldria tan estrecha que el texto se partiria
+        // palabra a palabra: mejor no sacarla.
+        this.detailWidth = reserve >= MIN_DETAIL_WIDTH ? reserve : 0;
+
+        this.panelWidth = panel;
+        int group = this.panelWidth + (this.detailWidth > 0 ? DETAIL_GAP + this.detailWidth : 0);
+        this.leftPos = Math.max(4, (this.width - group) / 2);
 
         // Boton del mod y no el de vanilla: el de vanilla es la textura gris de
         // siempre y desentonaba con el resto de la ventana, ademas de quedarse sin
@@ -239,50 +276,74 @@ public class CratePoolScreen extends Screen {
             return;
         }
 
+        if (this.detailWidth <= 0) {
+            return;
+        }
+
         List<Component> raw = stack.getTooltipLines(this.minecraft.player, TooltipFlag.Default.NORMAL);
         if (raw.isEmpty()) {
             return;
         }
 
-        // Se parten las lineas largas para que la ventana no crezca a lo ancho.
-        int maxText = 150;
+        int padding = 7;
+        int step = this.font.lineHeight + 1;
+        int maxText = this.detailWidth - padding * 2;
+
+        // Tope de alto: hay items con tooltips larguisimos (el de la captura tenia
+        // trece lineas antes de partirlas) y la ventana se salia de la pantalla.
+        int maxLines = Math.max(4, (this.height - 16 - padding * 2) / step);
+
         List<FormattedCharSequence> lines = new ArrayList<>();
-        int textWidth = 0;
+        boolean cut = false;
         for (Component line : raw) {
             for (FormattedCharSequence part : this.font.split(line, maxText)) {
+                if (lines.size() >= maxLines) {
+                    cut = true;
+                    break;
+                }
                 lines.add(part);
-                textWidth = Math.max(textWidth, this.font.width(part));
+            }
+            if (cut) {
+                break;
             }
         }
         if (lines.isEmpty()) {
             return;
         }
-
-        int padding = 8;
-        int boxWidth = textWidth + padding * 2;
-        int boxHeight = lines.size() * (this.font.lineHeight + 1) + padding * 2 - 1;
-
-        // A la derecha de la lista si cabe; si no, a la izquierda. Y si tampoco,
-        // pegada al borde sin salirse.
-        int gap = 6;
-        int x = this.leftPos + this.panelWidth + gap;
-        if (x + boxWidth > this.width - 4) {
-            x = this.leftPos - gap - boxWidth;
+        if (cut) {
+            // Se avisa de que hay mas, en vez de cortar sin decir nada.
+            lines.set(lines.size() - 1, Component.literal("\u00a78...").getVisualOrderText());
         }
-        x = Math.max(4, Math.min(x, this.width - boxWidth - 4));
+
+        int boxWidth = this.detailWidth;
+        int boxHeight = lines.size() * step + padding * 2 - 1;
+        int x = this.leftPos + this.panelWidth + DETAIL_GAP;
 
         // Centrada respecto a la ventana de recompensas, no respecto a la pantalla:
         // asi las dos quedan alineadas entre si.
         int y = this.topPos + (this.panelHeight - boxHeight) / 2;
         y = Math.max(4, Math.min(y, this.height - boxHeight - 4));
 
-        FSGui.panel(g, x, y, boxWidth, boxHeight);
+        // Se dibuja por encima de todo lo demas.
+        //
+        // Hacia falta porque los iconos de los items se dibujan a una profundidad
+        // de 150, y esta ventana, aun pintandose despues, quedaba por debajo: en la
+        // captura se veian los iconos y los nombres de la lista ATRAVESANDO la
+        // ventana. Subiendo la profundidad a 400 (la que usan los tooltips de
+        // vanilla) queda delante, y el flush deja el dibujo cerrado antes de
+        // devolver la profundidad a su sitio.
+        g.pose().pushPose();
+        g.pose().translate(0.0F, 0.0F, 400.0F);
 
+        FSGui.panel(g, x, y, boxWidth, boxHeight);
         int textY = y + padding;
         for (FormattedCharSequence line : lines) {
             g.drawString(this.font, line, x + padding, textY, 0xFFE6E6E6);
-            textY += this.font.lineHeight + 1;
+            textY += step;
         }
+
+        g.flush();
+        g.pose().popPose();
     }
 
     /**
