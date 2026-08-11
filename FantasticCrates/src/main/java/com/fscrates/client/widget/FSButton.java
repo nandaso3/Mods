@@ -2,6 +2,9 @@ package com.fscrates.client.widget;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.resources.sounds.SimpleSoundInstance;
+import net.minecraft.client.sounds.SoundManager;
+import net.minecraft.sounds.SoundEvents;
 import net.minecraft.client.gui.components.AbstractButton;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
@@ -24,8 +27,13 @@ public class FSButton extends AbstractButton {
     /** Lo que tarda la animacion al pasar o quitar el raton. */
     private static final float HOVER_MS = 160.0F;
 
-    /** Cuantas motas de luz suben por dentro del boton. */
-    private static final int MOTES = 5;
+    /**
+     * Cuantas motas de luz suben por dentro del boton.
+     *
+     * Eran 5 y se veian contadas y separadas. Con 14 el efecto se lee como un
+     * chispeo continuo en vez de como cinco puntos sueltos.
+     */
+    private static final int MOTES = 14;
 
     private final int accent;
     private final Runnable action;
@@ -42,6 +50,9 @@ public class FSButton extends AbstractButton {
      * aunque los fps bajen, que es justo lo que pasa en la pantalla del video.
      */
     private float clock;
+
+    /** Para que el sonido de pasar el raton suene solo al entrar. */
+    private boolean wasHovered;
 
     public FSButton(int x, int y, int width, int height, Component message, int accent, Runnable action) {
         super(x, y, width, height, message);
@@ -60,6 +71,44 @@ public class FSButton extends AbstractButton {
             this.action.run();
         }
     }
+
+    /**
+     * Sonido al pulsar: un tintineo de amatista en vez del clic seco de vanilla.
+     *
+     * El clic de vanilla es un golpe de madera, y encima de la escena de una caja
+     * suena a mueble. La amatista es una campanilla corta y limpia. Va a volumen
+     * bajo y con el tono un poco por debajo del natural para que quede calido y no
+     * cante por encima de la musica.
+     */
+    @Override
+    public void playDownSound(SoundManager sounds) {
+        sounds.play(SimpleSoundInstance.forUI(SoundEvents.AMETHYST_BLOCK_CHIME, 0.92F, 0.35F));
+    }
+
+    /**
+     * Sonido al posar el raton: el mismo tintineo, mas agudo y mucho mas flojo.
+     *
+     * Solo suena al ENTRAR, una vez. Si sonara mientras el raton esta encima seria
+     * insoportable, y es el fallo tipico de este efecto.
+     */
+    private void playHoverSound() {
+        // Tope global entre tintineos. En el editor hay muchos botones juntos y al
+        // pasar el raton de lado a lado sonarian todos de golpe, como una
+        // ametralladora. Con este minimo, un barrido rapido suena una vez.
+        long now = System.currentTimeMillis();
+        if (now - lastHoverSoundMs < 90L) {
+            return;
+        }
+        lastHoverSoundMs = now;
+
+        Minecraft mc = Minecraft.getInstance();
+        if (mc != null && mc.getSoundManager() != null) {
+            mc.getSoundManager().play(SimpleSoundInstance.forUI(SoundEvents.AMETHYST_BLOCK_CHIME, 1.45F, 0.13F));
+        }
+    }
+
+    /** Compartido por todos los botones: cuando sono el ultimo tintineo de paso. */
+    private static long lastHoverSoundMs;
 
     @Override
     protected void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
@@ -123,11 +172,11 @@ public class FSButton extends AbstractButton {
      * mas alla de su borde.
      */
     private void renderGlow(GuiGraphics g, int x, int y, int w, int h, float lit) {
-        // La altura del resplandor respira despacio, entre el 45% y el 70% del
-        // boton. Sin ese vaiven la luz parece pegada y no encendida.
-        float breath = 0.62F + 0.18F * (float) Math.sin(this.clock * 2.6F);
+        // La altura del resplandor respira despacio. Sin ese vaiven la luz parece
+        // pegada y no encendida.
+        float breath = 0.55F + 0.15F * (float) Math.sin(this.clock * 2.6F);
         float glowRows = (h - 2) * breath * lit;
-        int baseAlpha = (int) (165 * lit);
+        int baseAlpha = (int) (225 * lit);
 
         for (int row = 0; row < h - 2; row++) {
             // 0 en el borde de abajo, 1 en lo alto del resplandor.
@@ -135,9 +184,10 @@ public class FSButton extends AbstractButton {
             if (up > 1.0F) {
                 break;
             }
-            // Se apaga con el cuadrado de la distancia: concentra la luz abajo y
-            // la difumina arriba, en vez de dejar un corte recto.
-            float fade = (1.0F - up) * (1.0F - up);
+            // Se apaga con la distancia elevada a 1,6: concentra la luz abajo y la
+            // difumina arriba sin dejar un corte recto. Al cuadrado se apagaba
+            // demasiado pronto y el encendido casi no se notaba.
+            float fade = (float) Math.pow(1.0F - up, 1.35);
             int alpha = (int) (baseAlpha * fade);
             if (alpha <= 0) {
                 continue;
@@ -154,23 +204,41 @@ public class FSButton extends AbstractButton {
             return;
         }
         for (int i = 0; i < MOTES; i++) {
-            float speed = 0.45F + 0.12F * i;
-            float phase = (this.clock * speed + i * 0.37F) % 1.0F;
-            // Sube desde el borde de abajo hasta media altura y se apaga al subir.
-            float travel = phase * (h * 0.62F);
-            int moteY = (int) (y + h - 2 - travel);
+            // Antes iban a 0,45-0,99 vueltas por segundo, o sea entre 5 y 12
+            // pixeles por segundo: a 60 fotogramas por segundo la mota cambiaba de
+            // pixel una vez cada 5 o 10 fotogramas y parecia ir a tirones. Ahora
+            // van al doble de rapido, y sobre todo se dibujan repartidas entre dos
+            // filas segun la parte decimal de su altura, asi que se mueven suave
+            // aunque los pixeles sean enteros.
+            float speed = 1.05F + 0.075F * (i % 7);
+            float phase = (this.clock * speed + i * 0.618F) % 1.0F;
+            float travel = phase * (h * 0.72F);
+            float moteY = y + h - 2 - travel;
             if (moteY <= y + 2) {
                 continue;
             }
+
             // Reparto con la proporcion dorada: quedan repartidas por todo el
             // ancho en vez de amontonarse a un lado, que es lo que pasaba
             // multiplicando por un numero grande y sacando el resto.
             int moteX = x + 4 + (int) ((0.13F + i * 0.618F) % 1.0F * usable);
-            int alpha = (int) (205 * lit * (1.0F - phase) * Math.min(1.0F, phase * 5.0F));
+
+            // Aparece rapido y se apaga al subir.
+            int alpha = (int) (200 * lit * (1.0F - phase) * Math.min(1.0F, phase * 6.0F));
             if (alpha <= 4) {
                 continue;
             }
-            g.fill(moteX, moteY, moteX + 1, moteY + 1, withAlpha(0xFFFFFFFF, alpha));
+
+            int row = (int) moteY;
+            float frac = moteY - row;
+            int upper = (int) (alpha * (1.0F - frac));
+            int lower = (int) (alpha * frac);
+            if (upper > 3) {
+                g.fill(moteX, row, moteX + 1, row + 1, withAlpha(0xFFFFFFFF, upper));
+            }
+            if (lower > 3 && row + 1 < y + h - 1) {
+                g.fill(moteX, row + 1, moteX + 1, row + 2, withAlpha(0xFFFFFFFF, lower));
+            }
         }
     }
 
@@ -189,6 +257,10 @@ public class FSButton extends AbstractButton {
         step = Math.min(1.0F, Math.max(0.0F, step));
 
         boolean target = this.isHoveredOrFocused() && this.active;
+        if (target && !this.wasHovered) {
+            this.playHoverSound();
+        }
+        this.wasHovered = target;
         this.hover = Math.max(0.0F, Math.min(1.0F, this.hover + (target ? step : -step)));
 
         // El reloj de la animacion avanza en segundos reales.

@@ -1,6 +1,7 @@
 package com.fscrates.client.screen;
 
 import com.fscrates.client.media.CrateMedia;
+import com.fscrates.client.widget.FSButton;
 import com.fscrates.client.widget.ScrollbarDrag;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
@@ -10,7 +11,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -55,11 +55,20 @@ public class CratePoolScreen extends Screen {
         this.leftPos = (this.width - this.panelWidth) / 2;
         this.topPos = (this.height - this.panelHeight) / 2;
 
-        int closeWidth = Math.max(64, this.font.width("Cerrar") + 24);
+        // Boton del mod y no el de vanilla: el de vanilla es la textura gris de
+        // siempre y desentonaba con el resto de la ventana, ademas de quedarse sin
+        // el brillo y el sonido de los demas.
+        int closeWidth = Math.max(70, this.font.width("Cerrar") + 30);
         this.addRenderableWidget(
-            Button.builder(Component.literal("Cerrar"), b -> this.onClose())
-                .bounds(this.leftPos + (this.panelWidth - closeWidth) / 2, this.topPos + this.panelHeight - 25, closeWidth, 19)
-                .build()
+            new FSButton(
+                this.leftPos + (this.panelWidth - closeWidth) / 2,
+                this.topPos + this.panelHeight - 26,
+                closeWidth,
+                20,
+                Component.literal("Cerrar"),
+                FSGui.ACCENT_BLUE,
+                this::onClose
+            )
         );
 
         this.rebuildRows();
@@ -143,11 +152,19 @@ public class CratePoolScreen extends Screen {
             CrateMedia.renderBackground(g, this.width, this.height);
         }
 
-        g.fill(0, 0, this.width, this.height, -1610612736);
+        // Velo sobre la escena. Estaba al 63% de negro y dejaba todo apagado;
+        // al 38% se sigue leyendo la ventana y el video no queda muerto detras.
+        g.fill(0, 0, this.width, this.height, 0x61000000);
         FSGui.panel(g, this.leftPos, this.topPos, this.panelWidth, this.panelHeight);
 
         String title = "\u00a7d\u2726 \u00a7fRecompensas \u00a78(" + this.rows.size() + ")";
         g.drawString(this.font, title, this.leftPos + 9, this.topPos + 9, 16777215, false);
+
+        // Separador bajo el titulo, que se apaga hacia los lados en vez de cortar
+        // de golpe: es lo que hace que la cabecera no parezca pegada a la lista.
+        int lineY = this.topPos + 22;
+        g.fillGradient(this.leftPos + 8, lineY, this.leftPos + this.panelWidth / 2, lineY + 1, 0x00FFFFFF, 0x26FFFFFF);
+        g.fillGradient(this.leftPos + this.panelWidth / 2, lineY, this.leftPos + this.panelWidth - 8, lineY + 1, 0x26FFFFFF, 0x00FFFFFF);
 
         this.renderRows(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
@@ -188,9 +205,16 @@ public class CratePoolScreen extends Screen {
 
             boolean hovered = mouseX >= rowsLeft && mouseX < rowsLeft + rowsWide && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
             if (hovered) {
-                g.fill(rowsLeft, rowY, rowsLeft + rowsWide, rowY + ROW_HEIGHT, 419430400);
+                // La fila señalada se ACLARA en vez de oscurecerse, y el brillo se
+                // apaga hacia la derecha. Oscurecerla, que es lo que se hacia
+                // antes, sobre un fondo ya oscuro se nota apenas y ademas hunde la
+                // fila en vez de destacarla.
+                g.fillGradient(rowsLeft, rowY, rowsLeft + rowsWide, rowY + ROW_HEIGHT, 0x26FFFFFF, 0x0FFFFFFF);
+                g.fill(rowsLeft, rowY, rowsLeft + 1, rowY + ROW_HEIGHT, 0x66D07CE8);
             } else if ((index & 1) == 1) {
-                g.fill(rowsLeft, rowY, rowsLeft + rowsWide, rowY + ROW_HEIGHT, 234881023);
+                // Franjas alternas muy flojas: ayudan a seguir la fila sin
+                // convertir la lista en un tablero de ajedrez.
+                g.fill(rowsLeft, rowY, rowsLeft + rowsWide, rowY + ROW_HEIGHT, 0x0AFFFFFF);
             }
 
             if (row.icon() != null && !row.icon().isEmpty()) {
