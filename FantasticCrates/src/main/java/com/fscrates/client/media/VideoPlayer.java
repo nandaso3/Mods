@@ -63,6 +63,8 @@ public final class VideoPlayer implements AutoCloseable {
     private static final double DEFAULT_FRAME_SECONDS = 1.0 / 24.0;
     /** Si nos retrasamos mas que esto, resincronizamos en vez de acelerar. */
     private static final double MAX_DRIFT_SECONDS = 0.4;
+    /** A partir de este tamano de fotograma se reparte la conversion entre hilos. */
+    private static final int PARALLEL_CONVERT_PIXELS = 1_100_000;
 
     private static int textureSequence;
     private static ForkJoinPool convertPool;
@@ -170,7 +172,8 @@ public final class VideoPlayer implements AutoCloseable {
 
         this.decoderThread = new Thread(task, "FSCrates-VideoDecode");
         this.decoderThread.setDaemon(true);
-        this.decoderThread.setPriority(Thread.NORM_PRIORITY - 1);
+        // Prioridad minima: si hay que elegir, manda el juego.
+        this.decoderThread.setPriority(Thread.MIN_PRIORITY);
         this.decoderThread.start();
     }
 
@@ -246,11 +249,16 @@ public final class VideoPlayer implements AutoCloseable {
         }
 
         long now = System.nanoTime();
+        RgbaFrame chosen = null;
 
+        // Se busca el fotograma MAS NUEVO cuyo momento ya paso y se descartan los
+        // atrasados SIN subirlos a la GPU. Antes se subian todos uno detras de
+        // otro, y despues de un tiron eso amplificaba el paron: cada subida de un
+        // fotograma 1080p mueve 8 MB por el bus, en el hilo de render.
         while (true) {
             RgbaFrame next = this.ready.peek();
             if (next == null) {
-                return;
+                break;
             }
 
             if (!this.clockStarted) {
@@ -267,7 +275,7 @@ public final class VideoPlayer implements AutoCloseable {
 
             long dueAt = this.baseNanos + (long) ((next.timestamp() - this.baseTimestamp) * 1_000_000_000.0);
             if (now < dueAt) {
-                return;
+                break;
             }
 
             // Si vamos muy retrasados, reancla para no encadenar saltos.
@@ -277,18 +285,22 @@ public final class VideoPlayer implements AutoCloseable {
             }
 
             this.ready.poll();
-            this.show(next);
+            if (chosen != null) {
+                // Este ya no se ve: se recicla sin gastar nada en subirlo.
+                this.discard(chosen);
+            }
+            chosen = next;
+        }
 
-            // Si ya hay otro fotograma cuyo momento tambien paso, se descarta
-            // este y se sigue: asi se recupera el retraso sin retroceder.
-            RgbaFrame following = this.ready.peek();
-            if (following == null) {
-                return;
-            }
-            long followingDue = this.baseNanos + (long) ((following.timestamp() - this.baseTimestamp) * 1_000_000_000.0);
-            if (System.nanoTime() < followingDue) {
-                return;
-            }
+        if (chosen != null) {
+            this.show(chosen);
+        }
+    }
+
+    /** Devuelve el buffer al pool sin dibujarlo. */
+    private void discard(RgbaFrame frame) {
+        if (frame != null && !this.recycled.offer(frame)) {
+            MemoryUtil.memFree(frame.pixels());
         }
     }
 
@@ -517,28 +529,13 @@ public final class VideoPlayer implements AutoCloseable {
         }
         int[] scratch = this.scratch;
 
-        Runnable job = () -> IntStream.range(0, h).parallel().forEach(y -> {
-            int lumaRow = y * w;
-            int chromaRow = (y >> 1) * cw;
-            for (int x = 0; x < w; x++) {
-                int chromaCol = x >> 1;
-                int yy = luma[lumaRow + x] + 128;
-                int u = cb[chromaRow + chromaCol];
-                int v = cr[chromaRow + chromaCol];
+        Runnable job = () -> IntStream.range(0, h).parallel().forEach(y -> convertRow(y, luma, cb, cr, w, cw, scratch));
 
-                int r = yy + ((91881 * v) >> 16);
-                int g = yy - ((22554 * u + 46802 * v) >> 16);
-                int b = yy + ((116130 * u) >> 16);
-
-                // El buffer va en orden nativo (little endian), asi que este int
-                // aterriza en memoria como R, G, B, A: justo lo que espera GL_RGBA.
-                scratch[lumaRow + x] = 0xFF000000 | (clamp(b) << 16) | (clamp(g) << 8) | clamp(r);
-            }
-        });
-
-        ForkJoinPool pool = convertPool();
+        // La conversion solo se reparte entre hilos con fotogramas grandes. Con
+        // 720p un hilo tarda pocos milisegundos y no compensa despertar a mas.
+        ForkJoinPool pool = w * h >= PARALLEL_CONVERT_PIXELS ? convertPool() : null;
         if (pool == null) {
-            job.run();
+            IntStream.range(0, h).forEach(y -> convertRow(y, luma, cb, cr, w, cw, scratch));
         } else {
             pool.submit(job).join();
         }
@@ -584,6 +581,26 @@ public final class VideoPlayer implements AutoCloseable {
     private void release(YuvFrame frame) {
         if (frame != null && this.yuvPool.size() <= REORDER_WINDOW + 2) {
             this.yuvPool.offer(frame);
+        }
+    }
+
+    /** Convierte una fila YUV 4:2:0 a RGBA empaquetado en int. */
+    private static void convertRow(int y, byte[] luma, byte[] cb, byte[] cr, int w, int cw, int[] out) {
+        int lumaRow = y * w;
+        int chromaRow = (y >> 1) * cw;
+        for (int x = 0; x < w; x++) {
+            int chromaCol = x >> 1;
+            int yy = luma[lumaRow + x] + 128;
+            int u = cb[chromaRow + chromaCol];
+            int v = cr[chromaRow + chromaCol];
+
+            int r = yy + ((91881 * v) >> 16);
+            int g = yy - ((22554 * u + 46802 * v) >> 16);
+            int b = yy + ((116130 * u) >> 16);
+
+            // El buffer va en orden nativo (little endian), asi que este int
+            // aterriza en memoria como R, G, B, A: justo lo que espera GL_RGBA.
+            out[lumaRow + x] = 0xFF000000 | (clamp(b) << 16) | (clamp(g) << 8) | clamp(r);
         }
     }
 

@@ -17,6 +17,9 @@ import org.jcodec.common.model.Picture;
 /**
  * Decodificador de video con varios hilos, repartiendo el trabajo por GOPs.
  *
+ * Solo se usa cuando hace falta de verdad (video grande): con 720p un unico hilo
+ * va sobrado y gastar mas seria quitarle CPU al juego por nada.
+ *
  * JCodec decodifica con un solo hilo, y eso pone un techo bajo: en pruebas, unos
  * 27 fps a 1080p y 15 a 1440p. Como cada GOP (grupo que empieza en un keyframe)
  * se puede decodificar de forma independiente, aqui se reparten entre varios
@@ -76,16 +79,22 @@ final class GopDecoder implements AutoCloseable {
         // al menos un GOP por hilo. Se ajusta luego segun el tamano real del
         // fotograma para no comerse la RAM con videos grandes.
         int gopSize = keyFrames.length > 1 ? Math.max(1, keyFrames[1] - keyFrames[0]) : 12;
-        this.window = Math.max(12, Math.min(28, gopSize * workerCount + 4));
+        this.window = Math.max(10, Math.min(20, gopSize * workerCount + 2));
     }
 
     /**
      * Intenta crear un decodificador multihilo. Devuelve null si no se puede
      * (pocos nucleos, sin keyframes conocidos o un solo GOP).
      */
+    /**
+     * Por debajo de este numero de pixeles un solo hilo va sobrado, asi que no se
+     * gastan mas hilos: lo primero es no quitarle CPU al juego.
+     */
+    private static final int PARALLEL_PIXEL_THRESHOLD = 1_100_000;
+
     static GopDecoder tryCreate(Path file) {
         int cores = Runtime.getRuntime().availableProcessors();
-        if (cores < 4) {
+        if (cores < 6) {
             return null;
         }
 
@@ -99,9 +108,24 @@ final class GopDecoder implements AutoCloseable {
                 return null;
             }
 
-            // Un solo hilo por cada 4 nucleos, maximo 3: decodificar es intenso y
-            // no queremos ahogar al resto del juego.
-            int workers = Math.max(2, Math.min(3, cores / 4));
+            // Solo merece la pena repartir el trabajo con video grande. Con 720p un
+            // hilo da de sobra y asi el juego no nota nada.
+            Picture first = probe.getNativeFrame();
+            if (first == null) {
+                return null;
+            }
+            int pixels = first.getCroppedWidth() * first.getCroppedHeight();
+            if (pixels < PARALLEL_PIXEL_THRESHOLD) {
+                FSCrates.LOGGER.info(
+                    "[FSCrates] Video '{}' ({} px): un solo hilo de decodificado (va sobrado).",
+                    file.getFileName(),
+                    pixels
+                );
+                return null;
+            }
+
+            // Como maximo 2 hilos, y solo con CPU de sobra.
+            int workers = 2;
             GopDecoder decoder = new GopDecoder(file, workers, seekFrames, total);
             FSCrates.LOGGER.info(
                 "[FSCrates] Video '{}': {} fotogramas, {} GOPs, decodificando con {} hilos.",
@@ -121,7 +145,8 @@ final class GopDecoder implements AutoCloseable {
         for (int i = 0; i < this.workerCount; i++) {
             Thread t = new Thread(this::runWorker, "FSCrates-VideoDecode-" + i);
             t.setDaemon(true);
-            t.setPriority(Thread.NORM_PRIORITY - 1);
+            // Prioridad minima: el juego siempre va antes que el video de fondo.
+            t.setPriority(Thread.MIN_PRIORITY);
             this.workers[i] = t;
             t.start();
         }

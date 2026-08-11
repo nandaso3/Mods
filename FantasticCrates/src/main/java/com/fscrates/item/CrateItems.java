@@ -185,14 +185,15 @@ public final class CrateItems {
         return crate != null && crate.uniqueKeyEnabled && uniqueKeyMatches(crate, stack);
     }
 
-    /** Nombre de la llave que hace falta, para el mensaje al jugador. */
+    /**
+     * Nombre de la llave que hace falta, tal y como se ve en el inventario.
+     *
+     * Se usa expectedUniqueKeyName para que el mensaje diga exactamente el mismo
+     * nombre que lleva puesto el item, y no un texto generico.
+     */
     public static String requiredKeyName(CrateConfig crate) {
         if (crate != null && crate.uniqueKeyEnabled) {
-            String name = crate.uniqueKeyName;
-            if (name != null && !name.isBlank()) {
-                return name;
-            }
-            return "la llave de esta caja";
+            return expectedUniqueKeyName(crate).replace('&', '\u00a7');
         }
         return "\u00a7d\u2726 Fantastic Key \u2726";
     }

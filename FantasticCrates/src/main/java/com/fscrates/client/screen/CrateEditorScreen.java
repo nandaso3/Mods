@@ -1880,7 +1880,12 @@ public class CrateEditorScreen extends Screen {
         g.fill(this.leftPos, this.topPos, this.leftPos + this.panelWidth, this.topPos + this.panelHeight, -535291870);
         g.fill(this.leftPos, this.topPos, this.leftPos + this.panelWidth, this.topPos + 20, -14408646);
         g.fill(this.leftPos, this.topPos + this.panelHeight - 1, this.leftPos + this.panelWidth, this.topPos + this.panelHeight, -12961206);
-        g.fill(this.leftPos + 6, this.topPos + 46, this.leftPos + this.panelWidth - 6, this.topPos + 47, -12961206);
+        // El separador y la linea de ayuda van DEBAJO de las pestanas. Sus
+        // posiciones dependen de cuantas filas de pestanas haya: estaban fijas
+        // suponiendo una sola fila, y con dos filas la ayuda quedaba justo detras
+        // de la segunda (se veian trozos de texto entre los botones).
+        int separatorY = this.topPos + 24 + this.headerRowCount * TAB_ROW_HEIGHT + 2;
+        g.fill(this.leftPos + 6, separatorY, this.leftPos + this.panelWidth - 6, separatorY + 1, -12961206);
         g.drawString(
             this.font,
             "\u00a7d\u2726 \u00a7fFantastic Crates \u00a7d\u2726 \u00a77- " + this.config.rarity.color() + this.config.rarity.displayName(),
@@ -1891,7 +1896,7 @@ public class CrateEditorScreen extends Screen {
         );
         if (this.helpLine != null && !this.helpLine.isEmpty()) {
             String trimmed = this.font.plainSubstrByWidth("\u00a77" + this.helpLine, this.panelWidth - 16);
-            g.drawString(this.font, trimmed, this.leftPos + 8, this.topPos + 50, 10133680, false);
+            g.drawString(this.font, trimmed, this.leftPos + 8, separatorY + 4, 10133680, false);
         }
 
         if (this.activeTab == CrateEditorScreen.Tab.PROBABILITY) {

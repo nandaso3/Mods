@@ -10,7 +10,6 @@ import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
-import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
@@ -29,13 +28,11 @@ public class CratePoolScreen extends Screen {
     private final CrateConfig config;
     private final Screen parent;
 
-    private String query = "";
     private int scroll;
 
     private final List<Row> rows = new ArrayList<>();
     private final ScrollbarDrag scrollbarDrag = new ScrollbarDrag();
 
-    private EditBox search;
     private int leftPos;
     private int topPos;
     private int panelWidth;
@@ -57,17 +54,6 @@ public class CratePoolScreen extends Screen {
         this.leftPos = (this.width - this.panelWidth) / 2;
         this.topPos = (this.height - this.panelHeight) / 2;
 
-        this.search = new EditBox(this.font, this.leftPos + 9, this.topPos + 23, this.panelWidth - 18, 15, Component.empty());
-        this.search.setMaxLength(64);
-        this.search.setHint(Component.literal("\u00a78Buscar..."));
-        this.search.setValue(this.query);
-        this.search.setResponder(value -> {
-            this.query = value == null ? "" : value;
-            this.scroll = 0;
-            this.rebuildRows();
-        });
-        this.addRenderableWidget(this.search);
-
         int closeWidth = Math.max(64, this.font.width("Cerrar") + 24);
         this.addRenderableWidget(
             Button.builder(Component.literal("Cerrar"), b -> this.onClose())
@@ -82,8 +68,6 @@ public class CratePoolScreen extends Screen {
 
     private void rebuildRows() {
         this.rows.clear();
-        String needle = this.query.toLowerCase(Locale.ROOT).trim();
-
         for (RewardEntry entry : this.config.rewards) {
             if (entry.type != RewardEntry.Type.ITEM) {
                 continue;
@@ -92,10 +76,6 @@ public class CratePoolScreen extends Screen {
             String label = entry.label == null || entry.label.isBlank()
                 ? (entry.item == null || entry.item.isEmpty() ? "(item vac\u00edo)" : entry.item.getHoverName().getString())
                 : entry.label;
-            if (!needle.isEmpty() && !label.toLowerCase(Locale.ROOT).contains(needle)) {
-                continue;
-            }
-
             Rarity rarity = entry.effectiveRarity(this.config.rarity);
             // El porcentaje SOLO si la crate lo tiene activado.
             String odds = this.config.showOdds
@@ -108,11 +88,12 @@ public class CratePoolScreen extends Screen {
     }
 
     private int listTop() {
-        return this.topPos + 43;
+        // Sin buscador: la lista empieza justo debajo del titulo.
+        return this.topPos + 22;
     }
 
     private int listHeight() {
-        return this.panelHeight - 43 - 30;
+        return this.panelHeight - 22 - 30;
     }
 
     private int visibleRows() {

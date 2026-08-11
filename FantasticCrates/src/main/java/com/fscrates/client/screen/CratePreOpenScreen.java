@@ -143,8 +143,9 @@ public class CratePreOpenScreen extends Screen {
         }
 
         if (this.usableKey().isEmpty()) {
-            this.notice = "\u00a7cNecesitas \u00a7f" + CrateItems.requiredKeyName(this.config) + "\u00a7c en el inventario.";
-            this.noticeUntil = System.currentTimeMillis() + 3500L;
+            // Se dice el nombre exacto de la llave que falta.
+            this.notice = "\u00a7cTe falta la llave: " + CrateItems.requiredKeyName(this.config);
+            this.noticeUntil = System.currentTimeMillis() + 4000L;
             this.confirming = false;
             return;
         }
@@ -195,8 +196,6 @@ public class CratePreOpenScreen extends Screen {
             this.renderLoadingOverlay(g);
         }
 
-        this.renderKeyStatus(g);
-
         super.render(g, mouseX, mouseY, partialTick);
 
         if (this.confirming) {
@@ -204,15 +203,6 @@ public class CratePreOpenScreen extends Screen {
         }
         this.renderNotice(g);
         this.renderTransitions(g);
-    }
-
-    /** Indicador discreto de la llave, encima de los botones. */
-    private void renderKeyStatus(GuiGraphics g) {
-        ItemStack key = this.usableKey();
-        String text = key.isEmpty()
-            ? "\u00a7c\u2715 Te falta " + CrateItems.requiredKeyName(this.config)
-            : "\u00a7a\u2714 \u00a77Llave lista" + (this.config.consumeKey ? " \u00a78(se gastar\u00e1 1)" : "");
-        g.drawCenteredString(this.font, text, this.width / 2, this.height - 58, 0xFFFFFFFF);
     }
 
     /** Embed sutil de confirmacion: "¿consumir 1 llave?" */
