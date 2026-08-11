@@ -25,8 +25,8 @@ import java.util.List;
  *
  * El resultado era una pantalla en negro con un video correcto: H.264 de 8 bits,
  * yuv420p, todo en orden. Imposible de adivinar mirando el video. No salio antes
- * porque el video que trae el mod se exporto sin audio, y casi cualquier video
- * que descargue o grabe un usuario SI lleva audio.
+ * porque el video con el que se probaba estaba exportado sin audio, y casi
+ * cualquier video que descargue o grabe un usuario SI lleva audio.
  *
  * Como el mod nunca reproduce el audio del video (la musica va por su cuenta),
  * la solucion es no darle esas pistas al decodificador.

@@ -22,14 +22,12 @@ import net.minecraft.client.gui.GuiGraphics;
  */
 public final class CrateMedia {
     private static boolean active;
-    private static boolean usingDefaults;
 
     private static CompletableFuture<Path> videoFuture;
     private static CompletableFuture<Path> musicFuture;
 
     private static VideoPlayer video;
     private static MusicPlayer music;
-    private static VideoPlayer poster;
 
     /**
      * Por que no se pudo cargar cada cosa, para poder decirlo EN PANTALLA.
@@ -64,26 +62,25 @@ public final class CrateMedia {
         boolean customVideo = !videoUrls.isEmpty();
         boolean customMusic = !musicUrls.isEmpty();
 
-        // El poster es la imagen fija del video del mod, y solo vale mientras
-        // carga ese video. Con un video propio no se pinta nada de fondo hasta
-        // que llega el suyo, para no colar el del mod ni un instante.
-        usingDefaults = !customVideo;
-
         // Se registra el url exacto que se va a usar. Si algo no carga, esta
         // linea distingue las dos causas posibles de un tiron: que la caja no
-        // tenga guardada la media (aqui saldria "la del mod" aunque la hubieras
-        // puesto) o que falle la descarga (aqui sale tu url y el fallo despues).
+        // tenga guardada la media (aqui saldria que no hay ninguna configurada
+        // aunque la hubieras puesto) o que falle la descarga (aqui sale tu url y
+        // el fallo despues).
         String chosenVideo = customVideo ? pick(videoUrls) : null;
         String chosenMusic = customMusic ? pick(musicUrls) : null;
         FSCrates.LOGGER.info(
             "[FSCrates] Media de la escena -> video: {} | musica: {}",
-            chosenVideo == null ? "la del mod (la caja no tiene ninguno configurado)" : chosenVideo,
+            chosenVideo == null ? "ninguno (la caja no tiene video configurado: fondo negro)" : chosenVideo,
             chosenMusic == null ? "la del mod (la caja no tiene ninguna configurada)" : chosenMusic
         );
 
+        // Sin video configurado NO se pide nada: se queda en null. Asi no se
+        // registra un fallo que no existe (no tener video es una decision, no un
+        // error) y la pantalla no saca ningun aviso.
         videoFuture = chosenVideo != null
             ? MediaCache.obtain(chosenVideo, MediaCache.Kind.VIDEO)
-            : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.videos()));
+            : null;
         musicFuture = chosenMusic != null
             ? MediaCache.obtain(chosenMusic, MediaCache.Kind.MUSIC)
             : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.music()));
@@ -180,11 +177,6 @@ public final class CrateMedia {
         return active;
     }
 
-    /** true si esta sesion usa la media del mod (la crate no tiene media propia). */
-    public static boolean isUsingDefaults() {
-        return usingDefaults;
-    }
-
     /**
      * true cuando la escena ya se puede mostrar entera.
      *
@@ -241,24 +233,7 @@ public final class CrateMedia {
             }
         }
 
-        // Solo con la media por defecto usamos el poster mientras carga el video.
-        if (usingDefaults) {
-            renderPoster(g, width, height);
-        }
-    }
-
-    private static void renderPoster(GuiGraphics g, int width, int height) {
-        if (poster == null) {
-            Path file = DefaultMedia.poster();
-            if (file == null) {
-                return;
-            }
-            poster = new VideoPlayer(file);
-            poster.start();
-        }
-        if (!poster.hasFailed()) {
-            poster.render(g, width, height, 1.0F);
-        }
+        // Sin video no se pinta nada mas: queda el fondo negro de arriba.
     }
 
     // -------------------------------------------------------------------- cierre
@@ -266,7 +241,6 @@ public final class CrateMedia {
     /** Para todo y libera texturas, hilos y memoria nativa. */
     public static synchronized void stop() {
         active = false;
-        usingDefaults = false;
         videoFuture = null;
         musicFuture = null;
         videoError = null;
@@ -275,10 +249,6 @@ public final class CrateMedia {
         if (video != null) {
             video.close();
             video = null;
-        }
-        if (poster != null) {
-            poster.close();
-            poster = null;
         }
         if (music != null) {
             music.close();

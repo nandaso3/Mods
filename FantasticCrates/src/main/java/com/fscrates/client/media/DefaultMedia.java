@@ -27,12 +27,16 @@ import net.minecraft.server.packs.resources.Resource;
  * Nunca sirven de sustituto de una media personalizada que fallo.
  */
 public final class DefaultMedia {
-    /** Video por defecto: H.264/MP4 1600x900 a 24 fps. */
-    private static final String VIDEO = "default_dungeons.mp4";
-    /** Musica por defecto. */
+    /**
+     * Musica por defecto. Es lo UNICO que trae el mod.
+     *
+     * Antes venia tambien un video de ejemplo, y con el una imagen fija para
+     * tapar el rato que tardaba en arrancar. Se han quitado los dos: eran 76 MB
+     * de los 84 que pesaba el mod, para un video que cualquiera va a sustituir
+     * por el suyo. Sin video propio la escena queda con fondo negro, que es lo
+     * mismo que ya pasaba mientras cargaba uno personalizado.
+     */
     private static final String MUSIC = "default_music.mp3";
-    /** Imagen mostrada mientras el primer fotograma del video aun no esta listo. */
-    private static final String POSTER = "default_poster.jpg";
 
     private DefaultMedia() {
     }
@@ -42,35 +46,23 @@ public final class DefaultMedia {
     }
 
     /**
-     * Deja la media por defecto ya extraida en disco, en segundo plano.
+     * Deja la musica ya extraida en disco, en segundo plano.
      *
      * Se llama al arrancar el cliente para que la PRIMERA apertura de una caja no
-     * tenga que descomprimir 35 MB del JAR justo en ese momento, que es lo que
-     * daba tirones al juego y al video la primera vez.
+     * tenga que descomprimirla justo en ese momento.
      */
     public static void warmUp() {
         Thread thread = new Thread(() -> {
             try {
-                videos();
                 music();
-                poster();
-                FSCrates.LOGGER.info("[FSCrates] Media por defecto lista en cache.");
+                FSCrates.LOGGER.info("[FSCrates] Musica por defecto lista en cache.");
             } catch (Throwable t) {
-                FSCrates.LOGGER.warn("[FSCrates] No se pudo precargar la media por defecto: {}", t.toString());
+                FSCrates.LOGGER.warn("[FSCrates] No se pudo precargar la musica por defecto: {}", t.toString());
             }
         }, "FSCrates-MediaWarmup");
         thread.setDaemon(true);
         thread.setPriority(Thread.MIN_PRIORITY);
         thread.start();
-    }
-
-    public static List<Path> videos() {
-        List<Path> out = new ArrayList<>();
-        Path video = extract(VIDEO);
-        if (video != null) {
-            out.add(video);
-        }
-        return out;
     }
 
     public static List<Path> music() {
@@ -80,10 +72,6 @@ public final class DefaultMedia {
             out.add(track);
         }
         return out;
-    }
-
-    public static Path poster() {
-        return extract(POSTER);
     }
 
     /**

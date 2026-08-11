@@ -96,12 +96,25 @@ final class GopDecoder implements AutoCloseable {
     /**
      * Por debajo de este numero de pixeles un solo hilo va sobrado, asi que no se
      * gastan mas hilos: lo primero es no quitarle CPU al juego.
+     *
+     * Estaba en 1.100.000, que dejaba fuera el 720p (921.600) justo por encima
+     * del limite. Medido en 8 nucleos, el 720p en un solo hilo se queda en 49 fps:
+     * suficiente para un video de 30 pero no para uno de 60. Con el decodificado
+     * repartido sube a 122 fps, o sea dos veces y media.
+     *
+     * Se baja a 700.000, que cubre 720p en adelante. Por debajo no se toca porque
+     * de verdad no hace falta: un 640x360 da 255 fps con un hilo y 246 con tres,
+     * o sea que repartirlo solo gastaria CPU para nada.
      */
-    private static final int PARALLEL_PIXEL_THRESHOLD = 1_100_000;
+    private static final int PARALLEL_PIXEL_THRESHOLD = 700_000;
 
     static GopDecoder tryCreate(Path file) {
         int cores = Runtime.getRuntime().availableProcessors();
-        if (cores < 6) {
+        // Antes hacian falta 6 nucleos. Con 4 tambien compensa: ahi un 1080p en un
+        // solo hilo se queda a la mitad de los 30 fps que necesita, o sea a
+        // tirones, y con dos hilos llega. Los hilos van en prioridad minima, asi
+        // que ante cualquier disputa de CPU el juego pasa primero.
+        if (cores < 4) {
             return null;
         }
 
