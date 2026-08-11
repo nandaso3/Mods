@@ -15,11 +15,15 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FormattedText;
+import net.minecraft.network.chat.Style;
 import net.minecraftforge.fml.loading.FMLPaths;
 
 /**
@@ -225,6 +229,7 @@ public class CratePreOpenScreen extends Screen {
 
             this.renderTexts(g);
             this.renderAudioControl(g, mouseX, mouseY);
+            this.renderMediaProblems(g);
         }
 
         if (CrateMedia.isLoading()) {
@@ -436,6 +441,45 @@ public class CratePreOpenScreen extends Screen {
     }
 
     // ------------------------------------------------------------------- input
+
+    /**
+     * Dice en pantalla por que falta el video o la musica.
+     *
+     * Sin esto un enlace mal puesto deja la escena en negro y sin ninguna pista:
+     * el motivo estaba solo en el log, y nadie tiene por que leer un log para
+     * entender por que su caja no carga. Se pinta abajo a la izquierda, fuera de
+     * la zona de los botones y del texto de la caja.
+     */
+    private void renderMediaProblems(GuiGraphics g) {
+        String videoError = CrateMedia.videoError();
+        String musicError = CrateMedia.musicError();
+        if (videoError == null && musicError == null) {
+            return;
+        }
+
+        List<String> lines = new ArrayList<>();
+        if (videoError != null) {
+            lines.add("\u00a7cNo se pudo cargar el video: \u00a7f" + videoError);
+        }
+        if (musicError != null) {
+            lines.add("\u00a7cNo se pudo cargar la musica: \u00a7f" + musicError);
+        }
+        lines.add("\u00a77Revisa los enlaces en el editor. Detalles en logs/latest.log");
+
+        // Se recorta cada linea al ancho de la pantalla para no salirse.
+        int maxWidth = this.width - 16;
+        List<String> wrapped = new ArrayList<>();
+        for (String line : lines) {
+            wrapped.addAll(this.font.getSplitter().splitLines(line, maxWidth, Style.EMPTY)
+                .stream().map(FormattedText::getString).toList());
+        }
+
+        int y = this.height - 84 - wrapped.size() * (this.font.lineHeight + 1);
+        for (String line : wrapped) {
+            g.drawString(this.font, line, 8, y, 0xFFFFFFFF, true);
+            y += this.font.lineHeight + 1;
+        }
+    }
 
     /**
      * true cuando ya se puede mostrar la interfaz.

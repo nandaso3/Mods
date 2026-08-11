@@ -31,6 +31,16 @@ public final class CrateMedia {
     private static MusicPlayer music;
     private static VideoPlayer poster;
 
+    /**
+     * Por que no se pudo cargar cada cosa, para poder decirlo EN PANTALLA.
+     *
+     * Antes un enlace mal puesto daba una pantalla en negro y nada mas: el motivo
+     * solo estaba en el log, y no se le puede pedir a nadie que abra el log para
+     * entender por que su caja no funciona.
+     */
+    private static String videoError;
+    private static String musicError;
+
     private static float volume = 1.0F;
 
     private CrateMedia() {
@@ -132,9 +142,30 @@ public final class CrateMedia {
             // La causa real es la que dice por que fallo la descarga; el envoltorio
             // de CompletableFuture no aporta nada.
             Throwable cause = e.getCause() != null ? e.getCause() : e;
-            FSCrates.LOGGER.error("[FSCrates] Fallo al preparar la {}: {}", what, cause.getMessage() == null ? cause.toString() : cause.getMessage());
+            String reason = cause.getMessage() == null ? cause.toString() : cause.getMessage();
+            FSCrates.LOGGER.error("[FSCrates] Fallo al preparar la {}: {}", what, reason);
+            noteError(what, reason);
             return null;
         }
+    }
+
+    /** Guarda el motivo del fallo para pintarlo en la escena. */
+    private static void noteError(String what, String reason) {
+        if ("video".equals(what)) {
+            videoError = reason;
+        } else {
+            musicError = reason;
+        }
+    }
+
+    /** Motivo por el que no hay video, o null si no ha fallado. */
+    public static String videoError() {
+        return videoError;
+    }
+
+    /** Motivo por el que no hay musica, o null si no ha fallado. */
+    public static String musicError() {
+        return musicError;
     }
 
     // -------------------------------------------------------------------- estado
@@ -238,6 +269,8 @@ public final class CrateMedia {
         usingDefaults = false;
         videoFuture = null;
         musicFuture = null;
+        videoError = null;
+        musicError = null;
 
         if (video != null) {
             video.close();

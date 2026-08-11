@@ -111,8 +111,10 @@ public final class MediaCache {
             return null;
         }
 
-        String prefix = hash(url.trim());
-        Path exact = cacheFileFor(url.trim(), kind);
+        // Igual que en obtain: se busca por el enlace ya convertido.
+        String normalized = MediaUrls.normalize(url);
+        String prefix = hash(normalized);
+        Path exact = cacheFileFor(normalized, kind);
         if (isUsable(exact, kind)) {
             return exact;
         }
@@ -222,7 +224,14 @@ public final class MediaCache {
             return CompletableFuture.failedFuture(new IOException("url vacio"));
         }
 
-        final String clean = url.trim();
+        // Un enlace de "compartir" de Drive o Dropbox no devuelve el archivo sino
+        // una pagina web, y es justo el que la gente copia. Se convierte al de
+        // descarga directa antes de cualquier otra cosa, incluido el nombre en
+        // cache, para que las dos formas del mismo enlace no se bajen dos veces.
+        final String clean = MediaUrls.normalize(url);
+        if (MediaUrls.wasRewritten(url, clean)) {
+            FSCrates.LOGGER.info("[FSCrates] Enlace convertido a descarga directa: {} -> {}", url.trim(), clean);
+        }
 
         // Ya esta en disco: se usa tal cual, sin volver a descargar nunca.
         Path cached = findCached(clean, kind);
