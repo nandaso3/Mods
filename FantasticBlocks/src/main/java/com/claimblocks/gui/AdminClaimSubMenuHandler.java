@@ -243,6 +243,13 @@ public class AdminClaimSubMenuHandler extends ChestMenu {
       return pendingTransfers.containsKey(opId);
    }
 
+   /** Descarta una transferencia a medias para que no reviva en la siguiente sesion del operador. */
+   public static void clearPendingTransfer(UUID opId) {
+      if (opId != null) {
+         pendingTransfers.remove(opId);
+      }
+   }
+
    private static ItemStack withName(ItemStack s, Component t) {
       s.setHoverName(t);
       return s;

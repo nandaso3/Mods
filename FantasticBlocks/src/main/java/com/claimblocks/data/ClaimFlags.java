@@ -37,6 +37,10 @@ public class ClaimFlags {
    public boolean allowFlight = false;
    public boolean blockDoorsAccess = true;
    public boolean blockAllInteractions = true;
+   /** Bloquea el spawn de CUALQUIER mob dentro de la zona (hostiles, animales, acuaticos y de otros mods). */
+   public boolean blockAllMobSpawn = false;
+   /** Bloquea solo el spawn de mobs pacificos/animales, dejando pasar a los hostiles. */
+   public boolean blockPassiveMobSpawn = false;
 
    public boolean get(ClaimFlags.FlagId var1) {
       switch (var1) {
@@ -104,8 +108,12 @@ public class ClaimFlags {
             return this.blockDoorsAccess;
          case BLOCK_ALL_INTERACT:
             return this.blockAllInteractions;
+         case ALL_MOB_SPAWN:
+            return this.blockAllMobSpawn;
+         case PASSIVE_MOB_SPAWN:
+            return this.blockPassiveMobSpawn;
          default:
-            throw new IncompatibleClassChangeError();
+            return false;
       }
    }
 
@@ -206,6 +214,14 @@ public class ClaimFlags {
             break;
          case BLOCK_ALL_INTERACT:
             this.blockAllInteractions = var2;
+            break;
+         case ALL_MOB_SPAWN:
+            this.blockAllMobSpawn = var2;
+            break;
+         case PASSIVE_MOB_SPAWN:
+            this.blockPassiveMobSpawn = var2;
+            break;
+         default:
       }
    }
 
@@ -252,6 +268,8 @@ public class ClaimFlags {
       SIGN_EDITING,
       ALLOW_FLIGHT,
       DOORS_ACCESS,
-      BLOCK_ALL_INTERACT;
+      BLOCK_ALL_INTERACT,
+      ALL_MOB_SPAWN,
+      PASSIVE_MOB_SPAWN;
    }
 }

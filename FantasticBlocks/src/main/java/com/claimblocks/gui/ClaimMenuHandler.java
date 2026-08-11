@@ -1,16 +1,16 @@
 package com.claimblocks.gui;
 
 import com.claimblocks.ClaimBlocks;
+import com.claimblocks.chat.ChatPromptRouter;
 import com.claimblocks.data.Claim;
 import com.claimblocks.data.ClaimFlags;
 import com.claimblocks.data.ClaimGroup;
 import com.claimblocks.data.ClaimManager;
 import com.claimblocks.data.ClaimTier;
-import com.mojang.authlib.GameProfile;
+import com.claimblocks.util.PlayerLookup;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -22,7 +22,6 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.ClickEvent.Action;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.server.players.GameProfileCache;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.MenuProvider;
@@ -78,6 +77,18 @@ public class ClaimMenuHandler extends ChestMenu {
       ClaimFlags.FlagId.SHOW_BORDER,
       ClaimFlags.FlagId.SHOW_PARTICLES
    };
+   private static final int[] FLAG_SLOTS_P2 = new int[]{20, 22, 24};
+   private static final ClaimFlags.FlagId[] PAGE_2 = new ClaimFlags.FlagId[]{
+      ClaimFlags.FlagId.ALL_MOB_SPAWN,
+      ClaimFlags.FlagId.PASSIVE_MOB_SPAWN,
+      ClaimFlags.FlagId.BLOCK_ALL_INTERACT
+   };
+   /** Paginas de flags del menu, en orden. Anadir una pagina nueva es anadir una entrada aqui. */
+   private static final ClaimFlags.FlagId[][] PAGES = new ClaimFlags.FlagId[][]{PAGE_0, PAGE_1, PAGE_2};
+   private static final int[][] PAGE_SLOTS = new int[][]{FLAG_SLOTS_P0, FLAG_SLOTS_P1, FLAG_SLOTS_P2};
+   private static final int LAST_PAGE = PAGES.length - 1;
+   /** Tiempo que un prompt de chat espera respuesta antes de descartarse solo. */
+   private static final long PROMPT_TTL_MS = 90_000L;
    private static final Map<UUID, ClaimMenuHandler.PendingChat> pending = new ConcurrentHashMap<>();
    private static final Map<UUID, String> pendingMergeName = new ConcurrentHashMap<>();
    private static final Map<String, ClaimMenuHandler.MergeInvite> invites = new ConcurrentHashMap<>();
@@ -169,8 +180,8 @@ public class ClaimMenuHandler extends ChestMenu {
             )
          );
       ClaimFlags f = this.claim.getFlags();
-      ClaimFlags.FlagId[] ids = this.page == 0 ? PAGE_0 : PAGE_1;
-      int[] slots = this.page == 0 ? FLAG_SLOTS_P0 : FLAG_SLOTS_P1;
+      ClaimFlags.FlagId[] ids = PAGES[this.pageIndex()];
+      int[] slots = PAGE_SLOTS[this.pageIndex()];
       int tierLevel = paidLevelOf(this.claim.getTier());
 
       for (int i = 0; i < ids.length; i++) {
@@ -208,10 +219,14 @@ public class ClaimMenuHandler extends ChestMenu {
          .setItem(
             42,
             withLore(
-               withName(new ItemStack(Items.PLAYER_HEAD), Component.literal("Añadir miembro").withStyle(ChatFormatting.GREEN)),
+               withName(
+                  new ItemStack(Items.PLAYER_HEAD),
+                  Component.literal("Añadir miembro").withStyle(new ChatFormatting[]{ChatFormatting.GREEN, ChatFormatting.BOLD})
+               ),
                List.of(
-                  Component.literal("Pide nombre por chat").withStyle(ChatFormatting.GRAY),
-                  Component.literal("Clic para añadir").withStyle(ChatFormatting.GRAY)
+                  Component.literal("Clic izq: elegir de una lista").withStyle(ChatFormatting.GRAY),
+                  Component.literal("Clic der: escribir el nombre por chat").withStyle(ChatFormatting.GRAY),
+                  Component.literal("También sirve /claim addmember <jugador>").withStyle(ChatFormatting.DARK_GRAY)
                )
             )
          );
@@ -281,8 +296,15 @@ public class ClaimMenuHandler extends ChestMenu {
 
       this.chest.setItem(49, withName(new ItemStack(Items.RED_DYE), Component.literal("Cerrar").withStyle(ChatFormatting.WHITE)));
       this.chest.setItem(52, withName(new ItemStack(Items.BOOK), Component.literal("Ver lista de zonas").withStyle(ChatFormatting.AQUA)));
-      if (this.page == 0) {
-         this.chest.setItem(53, withName(new ItemStack(Items.ARROW), Component.literal("Página siguiente >>").withStyle(ChatFormatting.AQUA)));
+      if (this.page < LAST_PAGE) {
+         this.chest
+            .setItem(
+               53,
+               withLore(
+                  withName(new ItemStack(Items.ARROW), Component.literal("Página siguiente >>").withStyle(ChatFormatting.AQUA)),
+                  List.of(Component.literal("Página " + (this.page + 1) + " de " + (LAST_PAGE + 1)).withStyle(ChatFormatting.DARK_GRAY))
+               )
+            );
       }
 
       ClaimGroup grp = ClaimManager.getInstance().getGroupOf(this.claim);
@@ -363,7 +385,6 @@ public class ClaimMenuHandler extends ChestMenu {
       lore.add(Component.literal("Al entrar, la barrera los empuja y daña.").withStyle(ChatFormatting.DARK_GRAY));
       Set<UUID> banned = this.claim.getBannedPlayers();
       lore.add(Component.literal("Baneados: " + banned.size()).withStyle(new ChatFormatting[]{ChatFormatting.RED, ChatFormatting.BOLD}));
-      GameProfileCache cache = this.viewer.server.getProfileCache();
       int i = 0;
 
       for (UUID id : banned) {
@@ -372,13 +393,7 @@ public class ClaimMenuHandler extends ChestMenu {
             break;
          }
 
-         String name = id.toString().substring(0, 8);
-         Optional p;
-         if (cache != null && (p = cache.get(id)).isPresent()) {
-            name = ((GameProfile)p.get()).getName();
-         }
-
-         lore.add(Component.literal(truncate(" - " + name, 35)).withStyle(ChatFormatting.WHITE));
+         lore.add(Component.literal(truncate(" - " + PlayerLookup.nameOf(this.viewer.getServer(), id), 35)).withStyle(ChatFormatting.WHITE));
       }
 
       return lore;
@@ -395,66 +410,50 @@ public class ClaimMenuHandler extends ChestMenu {
    }
 
    private static void handleBanPlayer(ServerPlayer sender, Claim claim, String name, int page) {
-      UUID id = null;
-      String resolved = name;
-      ServerPlayer online = sender.server.getPlayerList().getPlayerByName(name);
-      if (online != null) {
-         id = online.getUUID();
-         resolved = online.getName().getString();
-      } else {
-         GameProfileCache cache = sender.server.getProfileCache();
-         Optional p = cache == null ? Optional.empty() : cache.get(name);
-         if (p.isPresent()) {
-            id = ((GameProfile)p.get()).getId();
-            resolved = ((GameProfile)p.get()).getName();
-         }
+      String query = ChatPromptRouter.extractPlayerName(name);
+      PlayerLookup.Resolved target = PlayerLookup.resolve(sender.getServer(), query);
+
+      if (target == null) {
+         sender.displayClientMessage(Component.literal("[x] Jugador no encontrado: " + query).withStyle(ChatFormatting.RED), false);
+         open(sender, claim, page);
+         return;
       }
 
-      if (id == null) {
-         sender.displayClientMessage(Component.literal("[x] Jugador no encontrado: " + name).withStyle(ChatFormatting.RED), false);
-         open(sender, claim, page);
-      } else if (claim.isOwner(id)) {
+      if (claim.isOwner(target.id())) {
          sender.displayClientMessage(Component.literal("[x] No puedes banear al dueño.").withStyle(ChatFormatting.RED), false);
          open(sender, claim, page);
-      } else {
-         claim.banPlayer(id);
-         claim.removeMember(id);
-         ClaimManager.getInstance().save();
-         sender.displayClientMessage(Component.literal("✔ " + resolved + " baneado de la zona.").withStyle(ChatFormatting.GREEN), false);
-         if (online != null) {
-            online.displayClientMessage(
-               Component.literal("[!] Has sido baneado de una zona de " + sender.getName().getString())
-                  .withStyle(new ChatFormatting[]{ChatFormatting.RED, ChatFormatting.BOLD}),
-               false
-            );
-         }
-
-         open(sender, claim, page);
+         return;
       }
+
+      claim.banPlayer(target.id());
+      claim.removeMember(target.id());
+      ClaimManager.getInstance().save();
+      sender.displayClientMessage(Component.literal("\u2714 " + target.name() + " baneado de la zona.").withStyle(ChatFormatting.GREEN), false);
+
+      Component notice = Component.literal("[!] Has sido baneado de una zona de " + sender.getName().getString())
+         .withStyle(new ChatFormatting[]{ChatFormatting.RED, ChatFormatting.BOLD});
+      if (target.isOnline()) {
+         target.online().displayClientMessage(notice, false);
+      } else {
+         ClaimManager.getInstance().queueMessage(target.id(), notice);
+      }
+
+      open(sender, claim, page);
    }
 
    private static void handleUnbanPlayer(ServerPlayer sender, Claim claim, String name, int page) {
-      UUID id = null;
-      ServerPlayer online = sender.server.getPlayerList().getPlayerByName(name);
-      if (online != null) {
-         id = online.getUUID();
-      } else {
-         GameProfileCache cache = sender.server.getProfileCache();
-         Optional p = cache == null ? Optional.empty() : cache.get(name);
-         if (p.isPresent()) {
-            id = ((GameProfile)p.get()).getId();
-         }
-      }
+      String query = ChatPromptRouter.extractPlayerName(name);
+      PlayerLookup.Resolved target = PlayerLookup.resolve(sender.getServer(), query);
 
-      if (id != null && claim.isBanned(id)) {
-         claim.unbanPlayer(id);
+      if (target != null && claim.isBanned(target.id())) {
+         claim.unbanPlayer(target.id());
          ClaimManager.getInstance().save();
-         sender.displayClientMessage(Component.literal("✔ " + name + " desbaneado.").withStyle(ChatFormatting.GREEN), false);
-         open(sender, claim, page);
+         sender.displayClientMessage(Component.literal("\u2714 " + target.name() + " desbaneado.").withStyle(ChatFormatting.GREEN), false);
       } else {
          sender.displayClientMessage(Component.literal("[x] Ese jugador no está baneado.").withStyle(ChatFormatting.RED), false);
-         open(sender, claim, page);
       }
+
+      open(sender, claim, page);
    }
 
    private static int paidLevelOf(ClaimTier t) {
@@ -570,7 +569,9 @@ public class ClaimMenuHandler extends ChestMenu {
          case ENDER_PEARL -> on ? "Ender pearl: BLOQUEADA [ON]" : "Ender pearl: permitida [OFF]";
          case SIGN_EDITING -> on ? "Letreros: BLOQUEADOS [ON]" : "Letreros: editables [OFF]";
          case DOORS_ACCESS -> on ? "Puertas/Botones: BLOQ [ON]" : "Puertas/Botones: libres [OFF]";
-         default -> throw new IncompatibleClassChangeError();
+         case ALL_MOB_SPAWN -> on ? "Spawn de mobs: BLOQUEADO [ON]" : "Spawn de mobs: permitido [OFF]";
+         case PASSIVE_MOB_SPAWN -> on ? "Animales: NO spawnean [ON]" : "Animales: spawnean [OFF]";
+         case BLOCK_ALL_INTERACT -> on ? "Interacción total: BLOQ [ON]" : "Interacción total: libre [OFF]";
       };
    }
 
@@ -607,7 +608,9 @@ public class ClaimMenuHandler extends ChestMenu {
          case ENDER_PEARL -> "Intrusos no se teletransportan";
          case SIGN_EDITING -> "Intrusos no editan letreros";
          case DOORS_ACCESS -> "Intrusos no usan puertas, botones ni placas";
-         default -> throw new IncompatibleClassChangeError();
+         case ALL_MOB_SPAWN -> "Nada spawnea aquí: hostiles, animales y mobs de otros mods";
+         case PASSIVE_MOB_SPAWN -> "Animales, peces y murciélagos dejan de spawnear (aldeanos no)";
+         case BLOCK_ALL_INTERACT -> "Intrusos no pueden interactuar con NADA en la zona";
       };
       String action = id != ClaimFlags.FlagId.SHOW_WELCOME && id != ClaimFlags.FlagId.SHOW_LEAVE
          ? (id == ClaimFlags.FlagId.SHOW_PARTICLES ? "Clic para elegir partícula y densidad" : "Clic para cambiar")
@@ -637,7 +640,7 @@ public class ClaimMenuHandler extends ChestMenu {
       if (slotId >= 0 && slotId < 54) {
          if (slotId == 45 && this.page > 0) {
             open(this.viewer, this.claim, this.page - 1);
-         } else if (slotId == 53 && this.page == 0) {
+         } else if (slotId == 53 && this.page < LAST_PAGE) {
             open(this.viewer, this.claim, this.page + 1);
          } else if (slotId == 46) {
             if (!this.awaitingDeleteConfirm) {
@@ -705,8 +708,14 @@ public class ClaimMenuHandler extends ChestMenu {
                   }
                }
             } else if (slotId == 42) {
-               requestAddMember(this.viewer, this.claim, this.page);
-               this.viewer.closeContainer();
+               // Clic izquierdo: selector visual (no depende del chat, funciona en cualquier server).
+               // Clic derecho: prompt por chat, para jugadores que no estan conectados.
+               if (button == 1) {
+                  requestAddMember(this.viewer, this.claim, this.page);
+                  this.viewer.closeContainer();
+               } else {
+                  MemberSelectMenu.open(this.viewer, this.claim, this.page, 0);
+               }
             } else if (slotId == 40) {
                if (this.claim.getMembers().isEmpty()) {
                   this.viewer.displayClientMessage(Component.literal("[i] Esta zona no tiene miembros que quitar.").withStyle(ChatFormatting.YELLOW), true);
@@ -774,9 +783,14 @@ public class ClaimMenuHandler extends ChestMenu {
       this.viewer.closeContainer();
    }
 
+   /** Indice de pagina siempre dentro de rango, para que indexar los arrays no pueda explotar. */
+   private int pageIndex() {
+      return Math.max(0, Math.min(LAST_PAGE, this.page));
+   }
+
    private ClaimFlags.FlagId slotToFlag(int slotIndex) {
-      ClaimFlags.FlagId[] ids = this.page == 0 ? PAGE_0 : PAGE_1;
-      int[] slots = this.page == 0 ? FLAG_SLOTS_P0 : FLAG_SLOTS_P1;
+      ClaimFlags.FlagId[] ids = PAGES[this.pageIndex()];
+      int[] slots = PAGE_SLOTS[this.pageIndex()];
 
       for (int i = 0; i < slots.length; i++) {
          if (slots[i] == slotIndex) {
@@ -801,7 +815,7 @@ public class ClaimMenuHandler extends ChestMenu {
             false
          );
       } else {
-         final int p = Math.max(0, Math.min(1, page));
+         final int p = Math.max(0, Math.min(LAST_PAGE, page));
          ClaimGroup titleGrp = ClaimManager.getInstance().getGroupOf(claim);
          final String title = customTitle != null
             ? truncate(customTitle, 40)
@@ -820,7 +834,12 @@ public class ClaimMenuHandler extends ChestMenu {
 
    public static void requestAddMember(ServerPlayer player, Claim claim, int returnPage) {
       pending.put(player.getUUID(), new ClaimMenuHandler.PendingChat(ClaimMenuHandler.PendingType.ADD_MEMBER, claim.getClaimId(), returnPage));
-      player.displayClientMessage(Component.literal("[Protección] Escribe el nombre del jugador (o 'cancelar'):").withStyle(ChatFormatting.YELLOW), false);
+      player.displayClientMessage(
+         Component.literal("[Protección] Escribe el nombre del jugador a añadir (o 'cancelar'):").withStyle(ChatFormatting.YELLOW), false
+      );
+      player.displayClientMessage(
+         Component.literal("    No hace falta que esté conectado. Alternativa: /claim addmember <jugador>").withStyle(ChatFormatting.DARK_GRAY), false
+      );
    }
 
    public static void requestRemoveMember(ServerPlayer player, Claim claim, int returnPage) {
@@ -855,157 +874,302 @@ public class ClaimMenuHandler extends ChestMenu {
       player.displayClientMessage(Component.literal("[Protección] Escribe tu mensaje de salida (max 60 chars) o 'cancelar':").withStyle(ChatFormatting.YELLOW), false);
    }
 
+   /** ¿Este jugador tiene un prompt del menu esperando respuesta por chat? */
+   public static boolean hasPrompt(UUID playerId) {
+      if (playerId == null) {
+         return false;
+      }
+
+      ClaimMenuHandler.PendingChat p = pending.get(playerId);
+      if (p == null) {
+         return false;
+      }
+
+      if (p.isExpired()) {
+         pending.remove(playerId, p);
+         return false;
+      }
+
+      return true;
+   }
+
+   /**
+    * Extrae (de forma atomica) el prompt pendiente de un jugador.
+    *
+    * <p>Es {@code remove} y no {@code get} a proposito: la respuesta puede llegar por dos rutas a la
+    * vez (el mixin del paquete de chat y {@code ServerChatEvent}), y solo una debe procesarla.
+    */
+   public static ClaimMenuHandler.PendingChat popPrompt(UUID playerId) {
+      if (playerId == null) {
+         return null;
+      }
+
+      ClaimMenuHandler.PendingChat p = pending.remove(playerId);
+      return p == null || p.isExpired() ? null : p;
+   }
+
+   /** Cancela el prompt pendiente de un jugador, si tenia alguno. */
+   public static void clearPrompt(UUID playerId) {
+      if (playerId != null) {
+         pending.remove(playerId);
+         pendingMergeName.remove(playerId);
+      }
+   }
+
+   /**
+    * Respaldo para Forge puro. En servidores hibridos este evento puede no llegar nunca, por eso el
+    * camino principal es {@link com.claimblocks.mixin.ServerChatPromptMixin}. Si el mixin ya se quedo
+    * con el mensaje, aqui no queda prompt pendiente y no se hace nada.
+    */
    public static void handleChat(ServerChatEvent event) {
       ServerPlayer sender = event.getPlayer();
-      UUID id = sender.getUUID();
-      if (AdminClaimSubMenuHandler.hasPendingTransfer(id)) {
-         event.setCanceled(true);
-         String text = event.getMessage().getString().trim();
-         UUID claimId = AdminClaimSubMenuHandler.popPendingTransfer(id);
-         sender.server.execute(() -> {
-            if (!text.equalsIgnoreCase("cancelar") && !text.equalsIgnoreCase("cancel") && !text.startsWith("/")) {
-               handleAdminTransfer(sender, claimId, text);
-            } else {
-               sender.displayClientMessage(Component.literal("[Protección] Cancelado.").withStyle(ChatFormatting.GRAY), false);
-            }
-         });
-      } else {
-         ClaimMenuHandler.PendingChat p = pending.get(id);
-         if (p != null) {
-            event.setCanceled(true);
-            String text = event.getMessage().getString().trim();
-            pending.remove(id);
-            sender.server.execute(() -> {
-               if (!text.equalsIgnoreCase("cancelar") && !text.equalsIgnoreCase("cancel") && !text.startsWith("/")) {
-                  Claim claim = findClaimById(p.claimId());
-                  if (claim == null) {
-                     sender.displayClientMessage(Component.literal("[x] La zona ya no existe.").withStyle(ChatFormatting.RED), false);
-                  } else {
-                     switch (p.type()) {
-                        case ADD_MEMBER:
-                           handleAddMember(sender, claim, text, p.returnPage());
-                           break;
-                        case REMOVE_MEMBER:
-                           handleRemoveMember(sender, claim, text, p.returnPage());
-                           break;
-                        case EDIT_WELCOME:
-                           handleEditWelcome(sender, claim, text, p.returnPage());
-                           break;
-                        case EDIT_LEAVE:
-                           handleEditLeave(sender, claim, text, p.returnPage());
-                           break;
-                        case BAN_PLAYER:
-                           handleBanPlayer(sender, claim, text, p.returnPage());
-                           break;
-                        case UNBAN_PLAYER:
-                           handleUnbanPlayer(sender, claim, text, p.returnPage());
-                           break;
-                        case MERGE_NAME:
-                           handleMergeName(sender, claim, text, p.returnPage());
-                           break;
-                        case MERGE_USERS:
-                           handleMergeUsers(sender, claim, text, p.returnPage());
-                     }
-                  }
-               } else {
-                  sender.displayClientMessage(Component.literal("[Protección] Cancelado.").withStyle(ChatFormatting.GRAY), false);
-               }
-            });
-         }
+      if (sender == null) {
+         return;
       }
+
+      String raw = event.getRawText();
+
+      // Ruta de respaldo: si el mixin no pudo capturar el mensaje, se procesa aqui.
+      if (ChatPromptRouter.consume(sender, raw)) {
+         event.setCanceled(true);
+         return;
+      }
+
+      // El mixin ya lo procesó: aquí solo hay que evitar que salga en el chat público.
+      if (ChatPromptRouter.shouldSuppress(sender.getUUID(), raw)) {
+         event.setCanceled(true);
+      }
+   }
+
+   /** Aplica la respuesta de un prompt. Debe ejecutarse en el hilo del servidor. */
+   public static void dispatchPrompt(ServerPlayer sender, ClaimMenuHandler.PendingChat p, String text) {
+      // El texto se captura en el hilo de red y esto corre despues en el hilo del servidor: entre
+      // ambos momentos el jugador puede haberse ido.
+      if (sender == null || p == null || sender.hasDisconnected()) {
+         return;
+      }
+
+      if (ChatPromptRouter.isCancel(text)) {
+         sender.displayClientMessage(Component.literal("[Protección] Cancelado.").withStyle(ChatFormatting.GRAY), false);
+         return;
+      }
+
+      Claim claim = findClaimById(p.claimId());
+      if (claim == null) {
+         sender.displayClientMessage(Component.literal("[x] La zona ya no existe.").withStyle(ChatFormatting.RED), false);
+         return;
+      }
+
+      switch (p.type()) {
+         case ADD_MEMBER:
+            handleAddMember(sender, claim, text, p.returnPage());
+            break;
+         case REMOVE_MEMBER:
+            handleRemoveMember(sender, claim, text, p.returnPage());
+            break;
+         case EDIT_WELCOME:
+            handleEditWelcome(sender, claim, text, p.returnPage());
+            break;
+         case EDIT_LEAVE:
+            handleEditLeave(sender, claim, text, p.returnPage());
+            break;
+         case BAN_PLAYER:
+            handleBanPlayer(sender, claim, text, p.returnPage());
+            break;
+         case UNBAN_PLAYER:
+            handleUnbanPlayer(sender, claim, text, p.returnPage());
+            break;
+         case MERGE_NAME:
+            handleMergeName(sender, claim, text, p.returnPage());
+            break;
+         case MERGE_USERS:
+            handleMergeUsers(sender, claim, text, p.returnPage());
+            break;
+      }
+   }
+
+   /** Aplica una transferencia de zona pedida desde el panel admin. Hilo del servidor. */
+   public static void dispatchAdminTransfer(ServerPlayer op, UUID claimId, String text) {
+      if (op == null || op.hasDisconnected()) {
+         return;
+      }
+
+      if (ChatPromptRouter.isCancel(text)) {
+         op.displayClientMessage(Component.literal("[Protección] Cancelado.").withStyle(ChatFormatting.GRAY), false);
+         return;
+      }
+
+      handleAdminTransfer(op, claimId, ChatPromptRouter.extractPlayerName(text));
    }
 
    private static void handleAdminTransfer(ServerPlayer op, UUID claimId, String name) {
       Claim claim = findClaimById(claimId);
       if (claim == null) {
          op.displayClientMessage(Component.literal("[x] La zona ya no existe.").withStyle(ChatFormatting.RED), false);
+         return;
+      }
+
+      PlayerLookup.Resolved target = PlayerLookup.resolve(op.getServer(), name);
+      if (target == null) {
+         op.displayClientMessage(Component.literal("[x] Jugador no encontrado: " + name).withStyle(ChatFormatting.RED), false);
+         return;
+      }
+
+      claim.setOwner(target.id(), target.name());
+      claim.getMembers().clear();
+      claim.getMemberNames().clear();
+      ClaimManager.getInstance().save();
+      op.displayClientMessage(Component.literal("\u2714 Zona transferida a " + target.name() + ".").withStyle(ChatFormatting.GREEN), false);
+
+      MutableComponent msg = Component.literal("[!] Un administrador te transfirió una zona ")
+         .withStyle(ChatFormatting.YELLOW)
+         .append(Component.literal(claim.sizeLabel()).withStyle(new ChatFormatting[]{ChatFormatting.WHITE, ChatFormatting.BOLD}))
+         .append(Component.literal(" en X:" + claim.getX() + " Z:" + claim.getZ()).withStyle(ChatFormatting.YELLOW));
+      if (target.isOnline()) {
+         target.online().displayClientMessage(msg, false);
       } else {
-         ServerPlayer online = op.server.getPlayerList().getPlayerByName(name);
-         String newOwnerName;
-         UUID newOwnerId;
-         if (online != null) {
-            newOwnerId = online.getUUID();
-            newOwnerName = online.getName().getString();
-         } else {
-            GameProfileCache profileCache = op.server.getProfileCache();
-            Optional profile = profileCache == null ? Optional.empty() : profileCache.get(name);
-            if (profile.isEmpty()) {
-               op.displayClientMessage(Component.literal("[x] Jugador no encontrado.").withStyle(ChatFormatting.RED), false);
-               return;
-            }
-
-            newOwnerId = ((GameProfile)profile.get()).getId();
-            newOwnerName = ((GameProfile)profile.get()).getName();
-         }
-
-         claim.setOwner(newOwnerId, newOwnerName);
-         claim.getMembers().clear();
-         claim.getMemberNames().clear();
-         ClaimManager.getInstance().save();
-         op.displayClientMessage(Component.literal("✔ Zona transferida a " + newOwnerName + ".").withStyle(ChatFormatting.GREEN), false);
-         MutableComponent msg = Component.literal("[!] Un administrador te transfirió una zona ")
-            .withStyle(ChatFormatting.YELLOW)
-            .append(Component.literal(claim.sizeLabel()).withStyle(new ChatFormatting[]{ChatFormatting.WHITE, ChatFormatting.BOLD}))
-            .append(Component.literal(" en X:" + claim.getX() + " Z:" + claim.getZ()).withStyle(ChatFormatting.YELLOW));
-         if (online != null) {
-            online.displayClientMessage(msg, false);
-         } else {
-            ClaimManager.getInstance().queueMessage(newOwnerId, msg);
-         }
+         ClaimManager.getInstance().queueMessage(target.id(), msg);
       }
    }
 
    private static void handleAddMember(ServerPlayer sender, Claim claim, String name, int page) {
-      ServerPlayer target = sender.server.getPlayerList().getPlayerByName(name);
+      addMemberByName(sender, claim, name, page, true);
+   }
+
+   /**
+    * Anade un miembro resolviendo el nombre. Es el camino unico que usan el prompt de chat, el
+    * selector visual y el comando {@code /claim addmember}.
+    *
+    * <p>A diferencia de la 7.6.5, el jugador <b>no necesita estar conectado</b>: si no esta online se
+    * resuelve con la cache de perfiles del servidor y se le deja el aviso en cola para cuando entre.
+    *
+    * @param reopenMenu si hay que volver a abrir el menu de la zona al terminar.
+    * @return true si el miembro quedo anadido.
+    */
+   public static boolean addMemberByName(ServerPlayer sender, Claim claim, String name, int page, boolean reopenMenu) {
+      String query = ChatPromptRouter.extractPlayerName(name);
+      PlayerLookup.Resolved target = PlayerLookup.resolve(sender.getServer(), query);
+
       if (target == null) {
-         sender.displayClientMessage(Component.literal("[x] " + name + " no está en línea.").withStyle(ChatFormatting.RED), false);
-      } else if (claim.isOwner(target.getUUID())) {
-         sender.displayClientMessage(Component.literal("[x] Ese jugador ya es el dueño.").withStyle(ChatFormatting.RED), false);
-      } else {
-         claim.addMember(target.getUUID(), target.getName().getString());
-         ClaimManager.getInstance().save();
-         sender.displayClientMessage(Component.literal("✔ Jugador agregado como miembro.").withStyle(ChatFormatting.GREEN), false);
-         target.displayClientMessage(Component.literal("[Protección] Eres miembro de la zona de " + sender.getName().getString()).withStyle(ChatFormatting.AQUA), false);
+         sender.displayClientMessage(
+            Component.literal("[x] No encuentro al jugador \"" + query + "\". Revisa el nombre; si nunca ha entrado al servidor, no puedo resolverlo.")
+               .withStyle(ChatFormatting.RED),
+            false
+         );
+         if (reopenMenu) {
+            open(sender, claim, page);
+         }
+
+         return false;
+      }
+
+      boolean added = addMemberResolved(sender, claim, target);
+      if (reopenMenu) {
          open(sender, claim, page);
       }
+
+      return added;
+   }
+
+   /** Anade un miembro ya resuelto (UUID + nombre). Devuelve true si se anadio de verdad. */
+   public static boolean addMemberResolved(ServerPlayer sender, Claim claim, PlayerLookup.Resolved target) {
+      if (claim.isOwner(target.id())) {
+         sender.displayClientMessage(Component.literal("[x] Ese jugador ya es el dueño.").withStyle(ChatFormatting.RED), false);
+         return false;
+      }
+
+      if (claim.isMember(target.id())) {
+         sender.displayClientMessage(
+            Component.literal("[i] " + target.name() + " ya es miembro de esta zona.").withStyle(ChatFormatting.YELLOW), false
+         );
+         return false;
+      }
+
+      if (claim.isBanned(target.id())) {
+         claim.unbanPlayer(target.id());
+         sender.displayClientMessage(
+            Component.literal("[i] " + target.name() + " estaba baneado de la zona; se le quitó el baneo.").withStyle(ChatFormatting.YELLOW), false
+         );
+      }
+
+      claim.addMember(target.id(), target.name());
+      ClaimManager.getInstance().save();
+      sender.displayClientMessage(
+         Component.literal("✔ " + target.name() + " agregado como miembro de la zona.").withStyle(ChatFormatting.GREEN), false
+      );
+
+      Component notice = Component.literal("[Protección] Eres miembro de la zona de " + sender.getName().getString()).withStyle(ChatFormatting.AQUA);
+      if (target.isOnline()) {
+         target.online().displayClientMessage(notice, false);
+      } else {
+         // El jugador esta desconectado: se le entrega el aviso en su proximo login.
+         ClaimManager.getInstance().queueMessage(target.id(), notice);
+      }
+
+      return true;
    }
 
    private static void handleRemoveMember(ServerPlayer sender, Claim claim, String name, int page) {
-      int idx = -1;
+      removeMemberByName(sender, claim, name, page, true);
+   }
 
-      for (int i = 0; i < claim.getMemberNames().size(); i++) {
-         if (claim.getMemberNames().get(i).equalsIgnoreCase(name)) {
-            idx = i;
+   /**
+    * Quita un miembro por nombre. Busca primero en la lista guardada de la zona (asi funciona con
+    * jugadores desconectados) y luego entre los conectados.
+    *
+    * @param reopenMenu si hay que volver a abrir el menu de la zona al terminar.
+    * @return true si el miembro se quito.
+    */
+   public static boolean removeMemberByName(ServerPlayer sender, Claim claim, String name, int page, boolean reopenMenu) {
+      String query = ChatPromptRouter.extractPlayerName(name);
+      UUID targetId = null;
+      String resolvedName = query;
+
+      for (int i = 0; i < claim.getMemberNames().size() && i < claim.getMembers().size(); i++) {
+         if (claim.getMemberNames().get(i).equalsIgnoreCase(query)) {
+            targetId = claim.getMembers().get(i);
+            resolvedName = claim.getMemberNames().get(i);
             break;
          }
       }
 
-      UUID targetId = null;
-      if (idx >= 0 && idx < claim.getMembers().size()) {
-         targetId = claim.getMembers().get(idx);
-      } else {
-         ServerPlayer online = sender.server.getPlayerList().getPlayerByName(name);
-         if (online != null && claim.isMember(online.getUUID())) {
-            targetId = online.getUUID();
+      if (targetId == null) {
+         PlayerLookup.Resolved resolved = PlayerLookup.resolve(sender.getServer(), query);
+         if (resolved != null && claim.isMember(resolved.id())) {
+            targetId = resolved.id();
+            resolvedName = resolved.name();
          }
       }
 
       if (targetId == null) {
-         sender.displayClientMessage(Component.literal("[x] " + name + " no es miembro de esta zona.").withStyle(ChatFormatting.RED), false);
-         open(sender, claim, page);
-      } else {
-         claim.removeMember(targetId);
-         ClaimManager.getInstance().save();
-         sender.displayClientMessage(Component.literal("✔ " + name + " fue eliminado de la zona.").withStyle(ChatFormatting.GREEN), false);
-         ServerPlayer removed = sender.server.getPlayerList().getPlayer(targetId);
-         if (removed != null) {
-            removed.displayClientMessage(
-               Component.literal("[Protección] Ya no eres miembro de la zona de " + sender.getName().getString()).withStyle(ChatFormatting.YELLOW), false
-            );
+         sender.displayClientMessage(
+            Component.literal("[x] " + query + " no es miembro de esta zona.").withStyle(ChatFormatting.RED), false
+         );
+         if (reopenMenu) {
+            open(sender, claim, page);
          }
 
+         return false;
+      }
+
+      claim.removeMember(targetId);
+      ClaimManager.getInstance().save();
+      sender.displayClientMessage(Component.literal("\u2714 " + resolvedName + " fue eliminado de la zona.").withStyle(ChatFormatting.GREEN), false);
+
+      Component notice = Component.literal("[Protecci\u00f3n] Ya no eres miembro de la zona de " + sender.getName().getString())
+         .withStyle(ChatFormatting.YELLOW);
+      ServerPlayer removed = sender.getServer() == null ? null : sender.getServer().getPlayerList().getPlayer(targetId);
+      if (removed != null) {
+         removed.displayClientMessage(notice, false);
+      } else {
+         ClaimManager.getInstance().queueMessage(targetId, notice);
+      }
+
+      if (reopenMenu) {
          open(sender, claim, page);
       }
+
+      return true;
    }
 
    private static void handleEditWelcome(ServerPlayer sender, Claim claim, String text, int page) {
@@ -1064,7 +1228,8 @@ public class ClaimMenuHandler extends ChestMenu {
       }
 
       pendingMergeName.remove(sender.getUUID());
-      String[] parts = text.split("[ ,]+");
+      // Se sanea antes de partir por si un plugin de chat inyecto formato en el mensaje.
+      String[] parts = ChatPromptRouter.sanitize(text).split("[ ,]+");
       int sent = 0;
 
       for (String raw : parts) {
@@ -1193,7 +1358,22 @@ public class ClaimMenuHandler extends ChestMenu {
    public static record MergeInvite(String code, UUID groupId, UUID targetId, String inviterName, String groupName) {
    }
 
-   public static record PendingChat(ClaimMenuHandler.PendingType type, UUID claimId, int returnPage) {
+   /**
+    * Prompt de chat pendiente para un jugador.
+    *
+    * <p>Lleva marca de tiempo porque desde la 7.7.0 la respuesta se captura a nivel de paquete: si el
+    * jugador se olvida de que dejo un prompt abierto, su siguiente mensaje de chat se interpretaria
+    * como respuesta. Con la caducidad, pasado un rato el prompt simplemente se descarta y el chat
+    * vuelve a ser chat.
+    */
+   public static record PendingChat(ClaimMenuHandler.PendingType type, UUID claimId, int returnPage, long createdAtMillis) {
+      public PendingChat(ClaimMenuHandler.PendingType type, UUID claimId, int returnPage) {
+         this(type, claimId, returnPage, System.currentTimeMillis());
+      }
+
+      public boolean isExpired() {
+         return System.currentTimeMillis() - this.createdAtMillis > PROMPT_TTL_MS;
+      }
    }
 
    public static enum PendingType {

@@ -17,10 +17,17 @@ import net.minecraft.world.level.storage.LevelResource;
 public final class GlobalFlags {
    private static final String FILE = "global_flags.json";
    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
-   private static GlobalFlags INSTANCE;
-   public boolean globalPVP = true;
-   public boolean globalMobGriefing = true;
-   public boolean globalFireSpread = true;
+   private static volatile GlobalFlags INSTANCE;
+   // volatile: MobSpawnEvent.FinalizeSpawn puede consultarlas desde hilos de generacion de
+   // chunks, mientras se escriben desde el hilo del servidor (comando y panel admin).
+   public volatile boolean globalPVP = true;
+   public volatile boolean globalMobGriefing = true;
+   public volatile boolean globalFireSpread = true;
+   /**
+    * Corta el spawn de CUALQUIER mob en todo el servidor, en todas las dimensiones y tambien fuera
+    * de las zonas protegidas. No afecta a huevos de spawn, crias, cubos ni /summon.
+    */
+   public volatile boolean globalNoMobSpawn = false;
 
    private GlobalFlags() {
    }
@@ -38,6 +45,7 @@ public final class GlobalFlags {
          case "globalPVP" -> this.globalPVP;
          case "globalMobGriefing" -> this.globalMobGriefing;
          case "globalFireSpread" -> this.globalFireSpread;
+         case "globalNoMobSpawn" -> this.globalNoMobSpawn;
          default -> false;
       };
    }
@@ -52,6 +60,11 @@ public final class GlobalFlags {
             break;
          case "globalFireSpread":
             this.globalFireSpread = value;
+            break;
+         case "globalNoMobSpawn":
+            this.globalNoMobSpawn = value;
+            break;
+         default:
       }
 
       this.applyToServer(server);
@@ -88,9 +101,16 @@ public final class GlobalFlags {
                this.globalFireSpread = o.get("globalFireSpread").getAsBoolean();
             }
 
+            if (o.has("globalNoMobSpawn")) {
+               this.globalNoMobSpawn = o.get("globalNoMobSpawn").getAsBoolean();
+            }
+
             this.applyToServer(server);
             ClaimBlocksMod.LOGGER
-               .info("Global flags cargadas: PVP={} MobGrief={} FireSpread={}", new Object[]{this.globalPVP, this.globalMobGriefing, this.globalFireSpread});
+               .info(
+                  "Global flags cargadas: PVP={} MobGrief={} FireSpread={} NoMobSpawn={}",
+                  new Object[]{this.globalPVP, this.globalMobGriefing, this.globalFireSpread, this.globalNoMobSpawn}
+               );
          } catch (Exception var51) {
             ClaimBlocksMod.LOGGER.error("No se pudo cargar global_flags.json", var51);
          }
@@ -105,6 +125,7 @@ public final class GlobalFlags {
          o.addProperty("globalPVP", this.globalPVP);
          o.addProperty("globalMobGriefing", this.globalMobGriefing);
          o.addProperty("globalFireSpread", this.globalFireSpread);
+         o.addProperty("globalNoMobSpawn", this.globalNoMobSpawn);
          Files.createDirectories(file.getParent());
          Files.writeString(file, GSON.toJson(o), StandardCharsets.UTF_8);
       } catch (IOException var41) {

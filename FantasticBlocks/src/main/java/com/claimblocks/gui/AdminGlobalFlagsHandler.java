@@ -52,6 +52,7 @@ public class AdminGlobalFlagsHandler extends ChestMenu {
       this.inv.setItem(11, flagButton("PVP global", g.globalPVP, "Permite PVP fuera de claims"));
       this.inv.setItem(13, flagButton("Mob griefing global", g.globalMobGriefing, "Mobs destruyen bloques fuera de claims"));
       this.inv.setItem(15, flagButton("Propagación de fuego", g.globalFireSpread, "Fire spread global gamerule"));
+      this.inv.setItem(17, flagButton("Sin spawn de mobs (global)", g.globalNoMobSpawn, "Ningún mob spawnea en TODO el servidor"));
       this.inv.setItem(22, withName(new ItemStack(Items.ARROW), Component.literal("Volver al panel").withStyle(ChatFormatting.AQUA)));
       this.broadcastChanges();
    }
@@ -86,6 +87,9 @@ public class AdminGlobalFlagsHandler extends ChestMenu {
             } else if (slot == 15) {
                name = "globalFireSpread";
                newVal = !g.globalFireSpread;
+            } else if (slot == 17) {
+               name = "globalNoMobSpawn";
+               newVal = !g.globalNoMobSpawn;
             }
 
             if (name != null) {

@@ -36,6 +36,20 @@ public final class ClaimCommands {
 
       return SharedSuggestionProvider.suggest(ids, builder);
    };
+   private static final SuggestionProvider<CommandSourceStack> ONLINE_PLAYERS = (ctx, builder) -> SharedSuggestionProvider.suggest(
+      ((CommandSourceStack)ctx.getSource()).getOnlinePlayerNames(), builder
+   );
+   private static final SuggestionProvider<CommandSourceStack> MEMBER_NAMES = (ctx, builder) -> {
+      ServerPlayer p = ((CommandSourceStack)ctx.getSource()).getPlayer();
+      if (p != null) {
+         Claim c = ClaimManager.getInstance().getClaimAt(p.level(), p.blockPosition());
+         if (c != null) {
+            return SharedSuggestionProvider.suggest(c.getMemberNames(), builder);
+         }
+      }
+
+      return builder.buildFuture();
+   };
 
    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
       dispatcher.register(
@@ -63,7 +77,16 @@ public final class ClaimCommands {
                   .then(
                      ((LiteralArgumentBuilder)Commands.literal("removemember").requires(s -> s.hasPermission(2)))
                         .then(Commands.argument("jugador", EntityArgument.player()).executes(ClaimCommands::removeMember))
-                  ))
+                  )
+                  .then(
+                     Commands.literal("addmember")
+                        .then(Commands.argument("jugador", StringArgumentType.word()).suggests(ONLINE_PLAYERS).executes(ClaimCommands::addMember))
+                  )
+                  .then(
+                     Commands.literal("delmember")
+                        .then(Commands.argument("jugador", StringArgumentType.word()).suggests(MEMBER_NAMES).executes(ClaimCommands::delMember))
+                  )
+                  .then(Commands.literal("members").executes(ClaimCommands::members)))
                .then(
                   ((LiteralArgumentBuilder)Commands.literal("give").requires(s -> s.hasPermission(2)))
                      .then(
@@ -92,7 +115,13 @@ public final class ClaimCommands {
                   .append(Component.literal("/claim list  ").withStyle(ChatFormatting.AQUA))
                   .append(Component.literal("- lista tus zonas\n").withStyle(ChatFormatting.GRAY))
                   .append(Component.literal("/claim remove  ").withStyle(ChatFormatting.AQUA))
-                  .append(Component.literal("- borra tu zona actual\n").withStyle(ChatFormatting.GRAY));
+                  .append(Component.literal("- borra tu zona actual\n").withStyle(ChatFormatting.GRAY))
+                  .append(Component.literal("/claim addmember <jugador>  ").withStyle(ChatFormatting.AQUA))
+                  .append(Component.literal("- añade un miembro (aunque esté offline)\n").withStyle(ChatFormatting.GRAY))
+                  .append(Component.literal("/claim delmember <jugador>  ").withStyle(ChatFormatting.AQUA))
+                  .append(Component.literal("- quita un miembro\n").withStyle(ChatFormatting.GRAY))
+                  .append(Component.literal("/claim members  ").withStyle(ChatFormatting.AQUA))
+                  .append(Component.literal("- lista los miembros de la zona\n").withStyle(ChatFormatting.GRAY));
                if (isOp) {
                   t.append(Component.literal("\n--- Solo Operadores ---\n").withStyle(ChatFormatting.RED))
                      .append(Component.literal("/claim give <jugador> <tier>\n").withStyle(ChatFormatting.YELLOW))
@@ -270,6 +299,85 @@ public final class ClaimCommands {
          );
          return 1;
       }
+   }
+
+   /**
+    * Devuelve la zona donde esta el ejecutor, comprobando que puede administrarla.
+    * Manda el error al ejecutor y devuelve null si no procede.
+    */
+   private static Claim ownedClaimAt(CommandSourceStack source, ServerPlayer p) {
+      Claim c = ClaimManager.getInstance().getClaimAt(p.level(), p.blockPosition());
+      if (c == null) {
+         source.sendFailure(Component.literal("[x] No estás en ninguna zona protegida.").withStyle(ChatFormatting.RED));
+         return null;
+      }
+
+      if (!c.isOwner(p) && !p.hasPermissions(2)) {
+         source.sendFailure(Component.literal("[x] Solo el dueño puede gestionar los miembros de esta zona.").withStyle(ChatFormatting.RED));
+         return null;
+      }
+
+      return c;
+   }
+
+   /**
+    * {@code /claim addmember <jugador>}: alta de miembro sin pasar por el chat.
+    *
+    * <p>Existe porque el menu pedia el nombre por chat y en servidores hibridos (Mohist) los plugins
+    * de chat pueden quedarse el mensaje. Esta ruta es un comando, asi que nunca depende de eso.
+    */
+   private static int addMember(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+      ServerPlayer exec = ((CommandSourceStack)ctx.getSource()).getPlayerOrException();
+      Claim c = ownedClaimAt((CommandSourceStack)ctx.getSource(), exec);
+      if (c == null) {
+         return 0;
+      }
+
+      String name = StringArgumentType.getString(ctx, "jugador");
+      return ClaimMenuHandler.addMemberByName(exec, c, name, 0, false) ? 1 : 0;
+   }
+
+   /** {@code /claim delmember <jugador>}: baja de miembro, tambien para jugadores desconectados. */
+   private static int delMember(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+      ServerPlayer exec = ((CommandSourceStack)ctx.getSource()).getPlayerOrException();
+      Claim c = ownedClaimAt((CommandSourceStack)ctx.getSource(), exec);
+      if (c == null) {
+         return 0;
+      }
+
+      String name = StringArgumentType.getString(ctx, "jugador");
+      return ClaimMenuHandler.removeMemberByName(exec, c, name, 0, false) ? 1 : 0;
+   }
+
+   /** {@code /claim members}: lista los miembros de la zona actual. */
+   private static int members(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+      ServerPlayer exec = ((CommandSourceStack)ctx.getSource()).getPlayerOrException();
+      // La lista de miembros solo la ve quien administra la zona, igual que en el menu.
+      Claim c = ownedClaimAt((CommandSourceStack)ctx.getSource(), exec);
+      if (c == null) {
+         return 0;
+      }
+
+      final Claim claim = c;
+      ((CommandSourceStack)ctx.getSource())
+         .sendSuccess(
+            () -> {
+               MutableComponent t = Component.literal("=== Miembros de la zona de " + claim.getOwnerName() + " (" + claim.getMembers().size() + ") ===\n")
+                  .withStyle(ChatFormatting.YELLOW);
+               if (claim.getMembers().isEmpty()) {
+                  t.append(Component.literal("(sin miembros)").withStyle(ChatFormatting.DARK_GRAY));
+               } else {
+                  for (int i = 0; i < claim.getMembers().size(); i++) {
+                     String n = i < claim.getMemberNames().size() ? claim.getMemberNames().get(i) : claim.getMembers().get(i).toString();
+                     t.append(Component.literal("- " + n + "\n").withStyle(ChatFormatting.WHITE));
+                  }
+               }
+
+               return t;
+            },
+            false
+         );
+      return claim.getMembers().size();
    }
 
    private static int removeMember(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

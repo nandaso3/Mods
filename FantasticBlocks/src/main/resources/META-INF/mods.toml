@@ -11,6 +11,8 @@ authors="${mod_authors}"
 description='''
 Mod de proteccion de zonas: 10 tiers usando concretos vanilla, flags por proteccion, panel admin y persistencia JSON. Forge 1.20.1.
 Incluye visualizacion del area con particulas (server-side, visible en clientes vanilla), mensaje de bienvenida y de salida configurables.
+Compatible con servidores hibridos (Mohist / Arclight / Magma): la entrada de texto de los menus se captura a nivel de paquete, por lo que
+funciona aunque los plugins de chat consuman el mensaje.
 '''
 
 [[dependencies.${mod_id}]]

@@ -369,6 +369,9 @@ public class Claim {
       jsonObject.addProperty("blockSignEditing", this.flags.blockSignEditing);
       jsonObject.addProperty("allowFlight", this.flags.allowFlight);
       jsonObject.addProperty("blockDoorsAccess", this.flags.blockDoorsAccess);
+      jsonObject.addProperty("blockAllInteractions", this.flags.blockAllInteractions);
+      jsonObject.addProperty("blockAllMobSpawn", this.flags.blockAllMobSpawn);
+      jsonObject.addProperty("blockPassiveMobSpawn", this.flags.blockPassiveMobSpawn);
       o.add("flags", jsonObject);
       return o;
    }
@@ -478,6 +481,9 @@ public class Claim {
          applyBool(f, "blockSignEditing", v -> c.flags.blockSignEditing = v);
          applyBool(f, "allowFlight", v -> c.flags.allowFlight = v);
          applyBool(f, "blockDoorsAccess", v -> c.flags.blockDoorsAccess = v);
+         applyBool(f, "blockAllInteractions", v -> c.flags.blockAllInteractions = v);
+         applyBool(f, "blockAllMobSpawn", v -> c.flags.blockAllMobSpawn = v);
+         applyBool(f, "blockPassiveMobSpawn", v -> c.flags.blockPassiveMobSpawn = v);
       }
 
       return c;

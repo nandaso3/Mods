@@ -6,7 +6,8 @@
   "refmap": "claimblocks.refmap.json",
   "mixins": [
     "PressurePlateMixin",
-    "DispenserBlockMixin"
+    "DispenserBlockMixin",
+    "ServerChatPromptMixin"
   ],
   "client": [],
   "injectors": {

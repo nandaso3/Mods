@@ -1,5 +1,6 @@
 package com.claimblocks.command;
 
+import com.claimblocks.chat.ChatPromptRouter;
 import com.claimblocks.data.Claim;
 import com.claimblocks.data.ClaimManager;
 import com.claimblocks.data.GlobalFlags;
@@ -21,7 +22,7 @@ import net.minecraft.server.level.ServerPlayer;
 
 public final class ClaimAdminCommands {
    private static final SuggestionProvider<CommandSourceStack> GLOBAL_FLAGS = (ctx, builder) -> SharedSuggestionProvider.suggest(
-         new String[]{"globalPVP", "globalMobGriefing", "globalFireSpread"}, builder
+         new String[]{"globalPVP", "globalMobGriefing", "globalFireSpread", "globalNoMobSpawn"}, builder
       );
    private static final SuggestionProvider<CommandSourceStack> ON_OFF = (ctx, builder) -> SharedSuggestionProvider.suggest(new String[]{"on", "off"}, builder);
 
@@ -106,7 +107,12 @@ public final class ClaimAdminCommands {
                   .append(Component.literal("Total zonas: " + all.size() + "\n").withStyle(ChatFormatting.GRAY))
                   .append(Component.literal("PVP global: " + (gf.globalPVP ? "ON" : "OFF") + "\n").withStyle(ChatFormatting.GRAY))
                   .append(Component.literal("MobGriefing: " + (gf.globalMobGriefing ? "ON" : "OFF") + "\n").withStyle(ChatFormatting.GRAY))
-                  .append(Component.literal("FireSpread: " + (gf.globalFireSpread ? "ON" : "OFF")).withStyle(ChatFormatting.GRAY)),
+                  .append(Component.literal("FireSpread: " + (gf.globalFireSpread ? "ON" : "OFF") + "\n").withStyle(ChatFormatting.GRAY))
+                  .append(Component.literal("Sin spawn de mobs (global): " + (gf.globalNoMobSpawn ? "ON" : "OFF") + "\n").withStyle(ChatFormatting.GRAY))
+                  .append(
+                     Component.literal("Captura de chat por paquete: " + (ChatPromptRouter.isPacketCaptureActive() ? "ACTIVA" : "sin usar aún"))
+                        .withStyle(ChatFormatting.DARK_GRAY)
+                  ),
             false
          );
       return 1;
@@ -115,7 +121,7 @@ public final class ClaimAdminCommands {
    private static int globalFlag(CommandContext<CommandSourceStack> ctx) {
       String flag = StringArgumentType.getString(ctx, "flag");
       String value = StringArgumentType.getString(ctx, "value");
-      if (!flag.equals("globalPVP") && !flag.equals("globalMobGriefing") && !flag.equals("globalFireSpread")) {
+      if (!flag.equals("globalPVP") && !flag.equals("globalMobGriefing") && !flag.equals("globalFireSpread") && !flag.equals("globalNoMobSpawn")) {
          ((CommandSourceStack)ctx.getSource()).sendFailure(Component.literal("[x] Flag desconocida: " + flag).withStyle(ChatFormatting.RED));
          return 0;
       } else {

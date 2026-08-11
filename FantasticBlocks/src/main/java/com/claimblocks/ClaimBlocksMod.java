@@ -1,5 +1,6 @@
 package com.claimblocks;
 
+import com.claimblocks.chat.ChatPromptRouter;
 import com.claimblocks.command.ClaimAdminCommands;
 import com.claimblocks.command.ClaimCommands;
 import com.claimblocks.data.Claim;
@@ -9,6 +10,7 @@ import com.claimblocks.event.BlockProtectionEvents;
 import com.claimblocks.event.EntityProtectionEvents;
 import com.claimblocks.event.PassiveEffectsManager;
 import com.claimblocks.event.PlayerTracker;
+import com.claimblocks.gui.AdminClaimSubMenuHandler;
 import com.claimblocks.gui.ClaimMenuHandler;
 import com.claimblocks.item.ClaimItems;
 import com.claimblocks.net.ClaimBordersPacket;
@@ -52,7 +54,7 @@ public class ClaimBlocksMod {
    private static int particleCounter = 0;
 
    public ClaimBlocksMod() {
-      LOGGER.info("[ClaimBlocks] Inicializando v7.6.5 (Forge 1.20.1)...");
+      LOGGER.info("[ClaimBlocks] Inicializando v7.7.0 (Forge 1.20.1)...");
       IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
       ClaimItems.register(modBus);
       ClaimNetwork.init();
@@ -114,6 +116,10 @@ public class ClaimBlocksMod {
 
    @SubscribeEvent
    public void onPlayerLeave(PlayerLoggedOutEvent event) {
+      // Se descarta cualquier prompt de menu a medias para que no reviva en la siguiente sesion.
+      ClaimMenuHandler.clearPrompt(event.getEntity().getUUID());
+      AdminClaimSubMenuHandler.clearPendingTransfer(event.getEntity().getUUID());
+      ChatPromptRouter.onPlayerDisconnect(event.getEntity().getUUID());
       PlayerTracker.onDisconnect(event.getEntity().getUUID());
    }
 
