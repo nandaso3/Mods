@@ -63,8 +63,20 @@ public class CratePoolScreen extends Screen {
     private static final int DETAIL_GAP = 6;
     /** Por debajo de este ancho la ventana no se muestra. */
     private static final int MIN_DETAIL_WIDTH = 104;
-    /** Hasta donde se puede estrechar la lista para hacerle sitio. */
-    private static final int MIN_PANEL_WIDTH = 240;
+
+    /** Lo que tarda la lista en apartarse o volver al centro. */
+    private static final float SHIFT_MS = 170.0F;
+
+    /** Sitio de la lista centrada, y el que ocupa cuando se aparta. */
+    private int centeredLeft;
+    private int shiftedLeft;
+
+    /** 0 = centrada, 1 = apartada. Se anima entre las dos. */
+    private float shift;
+    private long lastFrameMs = System.currentTimeMillis();
+
+    /** El boton de cerrar, que tiene que seguir a la lista al moverse. */
+    private FSButton closeButton;
 
     /**
      * true si este item tiene algo que merezca la pena mostrar aparte.
@@ -109,38 +121,26 @@ public class CratePoolScreen extends Screen {
         this.panelHeight = Math.min(this.height - 20, 220);
         this.topPos = (this.height - this.panelHeight) / 2;
 
-        // El sitio de la ventana de detalles se reserva AQUI, no al dibujarla.
-        //
-        // Antes se calculaba al vuelo: se intentaba a la derecha, luego a la
-        // izquierda y, si no cabia, se recortaba al borde de la pantalla. Y no cabe
-        // a ningun lado: con el panel de 330 centrado quedan unos 80 pixeles a cada
-        // lado y la ventana necesita 166. El recorte la dejaba encima del panel,
-        // tapando la lista.
-        //
-        // Ahora el panel y la ventana se colocan como un conjunto centrado, y si no
-        // hay hueco se estrecha el panel (hasta un minimo) antes de renunciar.
-        int panel = Math.min(this.width - 20, 330);
-        int reserve = Math.min(DETAIL_WIDTH, this.width - panel - DETAIL_GAP - 8);
-        if (reserve < DETAIL_WIDTH) {
-            int shrunk = Math.max(MIN_PANEL_WIDTH, this.width - DETAIL_GAP - 8 - DETAIL_WIDTH);
-            if (shrunk < panel) {
-                panel = shrunk;
-                reserve = Math.min(DETAIL_WIDTH, this.width - panel - DETAIL_GAP - 8);
-            }
-        }
-        // Por debajo de esto la ventana saldria tan estrecha que el texto se partiria
-        // palabra a palabra: mejor no sacarla.
-        this.detailWidth = reserve >= MIN_DETAIL_WIDTH ? reserve : 0;
+        // La lista mantiene su tamaño y su sitio: centrada, como siempre.
+        this.panelWidth = Math.min(this.width - 20, 330);
+        this.centeredLeft = (this.width - this.panelWidth) / 2;
 
-        this.panelWidth = panel;
-        int group = this.panelWidth + (this.detailWidth > 0 ? DETAIL_GAP + this.detailWidth : 0);
-        this.leftPos = Math.max(4, (this.width - group) / 2);
+        // La ventana de detalles no tiene sitio propio reservado. Lo que se calcula
+        // aqui son las DOS posiciones de la lista: la de siempre y la que ocupa
+        // cuando se aparta para dejar ver los detalles. Entre esas dos se anima.
+        int room = this.width - this.panelWidth - DETAIL_GAP - 8;
+        this.detailWidth = room >= MIN_DETAIL_WIDTH ? Math.min(DETAIL_WIDTH, room) : 0;
+        this.shiftedLeft = this.detailWidth > 0
+            ? Math.max(4, (this.width - (this.panelWidth + DETAIL_GAP + this.detailWidth)) / 2)
+            : this.centeredLeft;
+
+        this.leftPos = Math.round(this.centeredLeft + (this.shiftedLeft - this.centeredLeft) * this.shift);
 
         // Boton del mod y no el de vanilla: el de vanilla es la textura gris de
         // siempre y desentonaba con el resto de la ventana, ademas de quedarse sin
         // el brillo y el sonido de los demas.
         int closeWidth = Math.max(70, this.font.width("Cerrar") + 30);
-        this.addRenderableWidget(
+        this.closeButton = this.addRenderableWidget(
             new FSButton(
                 this.leftPos + (this.panelWidth - closeWidth) / 2,
                 this.topPos + this.panelHeight - 26,
@@ -235,6 +235,15 @@ public class CratePoolScreen extends Screen {
 
         // Velo sobre la escena. Estaba al 63% de negro y dejaba todo apagado;
         // al 38% se sigue leyendo la ventana y el video no queda muerto detras.
+        // Antes de dibujar nada: se mira si hay algo que contar, se avanza la
+        // animacion y se recoloca la lista y su boton.
+        this.detailStack = this.pickDetail(mouseX, mouseY);
+        this.updateShift(!this.detailStack.isEmpty());
+        this.leftPos = Math.round(this.centeredLeft + (this.shiftedLeft - this.centeredLeft) * this.shift);
+        if (this.closeButton != null) {
+            this.closeButton.setX(this.leftPos + (this.panelWidth - this.closeButton.getWidth()) / 2);
+        }
+
         g.fill(0, 0, this.width, this.height, 0x61000000);
         FSGui.panel(g, this.leftPos, this.topPos, this.panelWidth, this.panelHeight);
 
@@ -251,12 +260,54 @@ public class CratePoolScreen extends Screen {
         // dos lineas pisandose.
         this.fadeLine(g, this.leftPos + 8, this.topPos + 20, this.panelWidth - 16);
 
-        // Se decide en cada fotograma: lo pone renderRows si el raton esta sobre una
-        // fila con algo que contar.
-        this.detailStack = ItemStack.EMPTY;
         this.renderRows(g, mouseX, mouseY);
         this.renderDetails(g);
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * Item señalado por el raton, si tiene algo que contar.
+     *
+     * La fila se decide SOLO por la altura del raton, y a lo ancho se acepta
+     * cualquier punto entre la posicion centrada y la apartada.
+     *
+     * Eso ultimo es lo que evita un pique: al apartarse, la lista se mueve 86
+     * pixeles: si el raton estaba cerca de su borde derecho, dejaria de estar encima,
+     * los detalles desapareceran, la lista volveria al centro, el raton volveria a
+     * estar encima... y se quedaria temblando. Aceptando toda la franja por la que la
+     * lista puede pasar, el raton nunca se queda fuera por el propio movimiento.
+     */
+    private ItemStack pickDetail(int mouseX, int mouseY) {
+        if (this.detailWidth <= 0 || this.rows.isEmpty()) {
+            return ItemStack.EMPTY;
+        }
+
+        int listTop = this.listTop();
+        if (mouseY < listTop || mouseY >= listTop + this.listHeight()) {
+            return ItemStack.EMPTY;
+        }
+
+        int bandLeft = Math.min(this.centeredLeft, this.shiftedLeft);
+        int bandRight = Math.max(this.centeredLeft, this.shiftedLeft) + this.panelWidth;
+        if (mouseX < bandLeft || mouseX >= bandRight) {
+            return ItemStack.EMPTY;
+        }
+
+        int index = this.scroll + (mouseY - listTop) / ROW_HEIGHT;
+        if (index < 0 || index >= this.rows.size()) {
+            return ItemStack.EMPTY;
+        }
+
+        ItemStack stack = this.rows.get(index).icon();
+        return hasDetails(stack) ? stack : ItemStack.EMPTY;
+    }
+
+    /** Avanza la animacion de apartarse, en tiempo real y no en ticks. */
+    private void updateShift(boolean wantsDetails) {
+        long now = System.currentTimeMillis();
+        float step = Math.min(1.0F, Math.max(0.0F, (now - this.lastFrameMs) / SHIFT_MS));
+        this.lastFrameMs = now;
+        this.shift = Math.max(0.0F, Math.min(1.0F, this.shift + (wantsDetails ? step : -step)));
     }
 
     /**
@@ -276,7 +327,9 @@ public class CratePoolScreen extends Screen {
             return;
         }
 
-        if (this.detailWidth <= 0) {
+        // Mientras la lista aun se esta apartando no se dibuja: asi la ventana no
+        // aparece encima de ella, sino en el hueco que acaba de dejar.
+        if (this.detailWidth <= 0 || this.shift < 0.55F) {
             return;
         }
 
@@ -404,9 +457,6 @@ public class CratePoolScreen extends Screen {
             int textY = rowY + (ROW_HEIGHT - 8) / 2;
 
             boolean hovered = mouseX >= rowsLeft && mouseX < rowsLeft + rowsWide && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
-            if (hovered && hasDetails(row.icon())) {
-                this.detailStack = row.icon();
-            }
             if (hovered) {
                 // La fila señalada se ACLARA en vez de oscurecerse, y el brillo se
                 // apaga hacia la derecha. Oscurecerla, que es lo que se hacia
