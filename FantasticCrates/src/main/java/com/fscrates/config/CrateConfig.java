@@ -41,6 +41,13 @@ public class CrateConfig {
     public FSTextStyle sceneSubtitle = new FSTextStyle("Prep\u00e1rate para abrir tu caja", "#AAAAAA");
     /** Estilo con el que se pinta el nombre de la caja en la escena. */
     public FSTextStyle nameStyle = new FSTextStyle("", "#FFFFFF");
+    /**
+     * Mostrar el porcentaje en la pantalla de recompensas.
+     *
+     * Va aparte de showOdds a proposito: showOdds es la lista flotante ENCIMA del
+     * bloque, y son dos cosas distintas que antes compartian el mismo campo.
+     */
+    public boolean showOddsInPool = true;
     /** Lineas extra de texto libre, debajo del subtitulo. */
     public final List<FSTextStyle> sceneLines = new ArrayList<>();
     public final List<ParticleLayer> particleLayers = new ArrayList<>();
@@ -203,6 +210,7 @@ public class CrateConfig {
         tag.put("sceneHeaderStyle", (this.sceneHeader == null ? new FSTextStyle() : this.sceneHeader).save());
         tag.put("sceneSubtitleStyle", (this.sceneSubtitle == null ? new FSTextStyle() : this.sceneSubtitle).save());
         tag.put("nameStyle", (this.nameStyle == null ? new FSTextStyle() : this.nameStyle).save());
+        tag.putBoolean("showOddsInPool", this.showOddsInPool);
         ListTag sceneList = new ListTag();
 
         for (FSTextStyle line : this.sceneLines) {
@@ -320,6 +328,10 @@ public class CrateConfig {
 
         if (tag.contains("nameStyle")) {
             c.nameStyle = FSTextStyle.load(tag.getCompound("nameStyle"));
+        }
+
+        if (tag.contains("showOddsInPool")) {
+            c.showOddsInPool = tag.getBoolean("showOddsInPool");
         }
 
         c.sceneLines.clear();

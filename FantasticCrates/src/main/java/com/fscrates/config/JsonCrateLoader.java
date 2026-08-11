@@ -189,7 +189,10 @@ public final class JsonCrateLoader {
             opening, "soloUnaVezPorJugador", bool(opening, "soloUnAperturaPorJugador", config.openOncePerPlayer)
         );
         config.requiredPermission = string(opening, "permisoRequerido", config.requiredPermission);
-        config.showOdds = bool(opening, "mostrarProbabilidades", config.showOdds);
+        config.showOdds = bool(opening, "mostrarProbabilidadesSobreElCofre", config.showOdds);
+        config.showOddsInPool = bool(
+            opening, "mostrarProbabilidadesEnRecompensas", bool(opening, "mostrarProbabilidades", config.showOddsInPool)
+        );
 
         config.pityEnabled = bool(pity, "activado", bool(pity, "pityActivado", config.pityEnabled));
         config.pityInterval = Math.max(
@@ -445,7 +448,8 @@ public final class JsonCrateLoader {
         opening.addProperty("anuncioGlobal", config.broadcast);
         opening.addProperty("soloUnaVezPorJugador", config.openOncePerPlayer);
         opening.addProperty("permisoRequerido", config.requiredPermission == null ? "" : config.requiredPermission);
-        opening.addProperty("mostrarProbabilidades", config.showOdds);
+        opening.addProperty("mostrarProbabilidadesSobreElCofre", config.showOdds);
+        opening.addProperty("mostrarProbabilidadesEnRecompensas", config.showOddsInPool);
         root.add("apertura", opening);
 
         // ---- pity

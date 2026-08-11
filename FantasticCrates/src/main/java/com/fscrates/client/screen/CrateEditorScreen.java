@@ -1526,15 +1526,17 @@ public class CrateEditorScreen extends Screen {
             tx,
             y + 122,
             colW,
-            this.config.showOdds ? "Mostrar probabilidades: S\u00ed" : "Mostrar probabilidades: No",
-            this.config.showOdds,
+            this.config.showOddsInPool ? "% en recompensas: S\u00ed" : "% en recompensas: No",
+            this.config.showOddsInPool,
             () -> {
-                this.config.showOdds = !this.config.showOdds;
+                this.config.showOddsInPool = !this.config.showOddsInPool;
                 this.rebuildWidgets();
             },
             desc(
-                "Si est\u00e1 activado, los jugadores ver\u00e1n el % de probabilidad",
-                "de cada item en la pantalla de pool de recompensas."
+                "El % de cada item en la pantalla \u00abVER RECOMPENSAS\u00bb.",
+                "",
+                "\u00a77Es distinto de \u00a7fMostrar % encima\u00a77 (pesta\u00f1a Aspecto),",
+                "\u00a77que es la lista flotante sobre el cofre."
             )
         );
     }

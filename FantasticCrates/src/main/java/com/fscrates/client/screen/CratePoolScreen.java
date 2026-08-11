@@ -87,7 +87,7 @@ public class CratePoolScreen extends Screen {
             String label = labelOf(entry);
             Rarity rarity = entry.effectiveRarity(this.config.rarity);
             // El porcentaje SOLO si la crate lo tiene activado.
-            String odds = this.config.showOdds
+            String odds = this.config.showOddsInPool
                 ? String.format(Locale.ROOT, "%.2f%%", this.config.normalizedPercentInPool(entry))
                 : "";
             this.rows.add(new Row(entry.item, label, rarity.displayName(), rarity.rgb(), odds));

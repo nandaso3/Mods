@@ -50,6 +50,12 @@ public final class CrateMedia {
 
         if (custom) {
             // Media personalizada del admin: se descarga y se cachea en disco.
+            // Nunca se mezcla con la del mod, ni siquiera mientras carga.
+            FSCrates.LOGGER.info(
+                "[FSCrates] Media personalizada: {} video(s) y {} cancion(es) configuradas; no se usa la del mod.",
+                videoUrls.size(),
+                musicUrls.size()
+            );
             videoFuture = videoUrls.isEmpty() ? null : MediaCache.obtain(pick(videoUrls), MediaCache.Kind.VIDEO);
             musicFuture = musicUrls.isEmpty() ? null : MediaCache.obtain(pick(musicUrls), MediaCache.Kind.MUSIC);
         } else {
@@ -108,6 +114,11 @@ public final class CrateMedia {
 
     public static boolean isActive() {
         return active;
+    }
+
+    /** true si esta sesion usa la media del mod (la crate no tiene media propia). */
+    public static boolean isUsingDefaults() {
+        return usingDefaults;
     }
 
     /** Volumen lineal ya calculado (0 = mute). */
