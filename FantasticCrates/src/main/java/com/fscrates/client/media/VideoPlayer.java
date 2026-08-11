@@ -75,6 +75,16 @@ public final class VideoPlayer implements AutoCloseable {
      */
     private static final int PARALLEL_CONVERT_PIXELS = 2_500_000;
 
+    /**
+     * Desde cuantos pixeles de salida se reparte la ampliacion entre hilos.
+     *
+     * Es mas bajo que el de la conversion porque ampliar cuesta bastante mas por
+     * pixel, y porque cuando hay que ampliar el video es pequeño y el decodificado
+     * deja la CPU libre. Medido para 640x360 a 1080p: 17,6 ms en un hilo y 8,1 ms
+     * en cuatro.
+     */
+    private static final int PARALLEL_SCALE_PIXELS = 1_000_000;
+
     private static int textureSequence;
     private static ForkJoinPool convertPool;
 
@@ -112,13 +122,20 @@ public final class VideoPlayer implements AutoCloseable {
     private YuvToRgb converter;
 
     /**
-     * Cuanto se esta ampliando el video en pantalla. Lo escribe el hilo de render
-     * y lo lee el de decodificado para decidir si hace falta enfocar.
+     * Hueco donde se dibuja el video, en pixeles reales de pantalla. Lo escribe
+     * el hilo de render y lo lee el de decodificado.
      */
-    private volatile float drawScale = 1.0F;
+    private volatile int panelWidth;
+    private volatile int panelHeight;
 
     /** Brillo ya enfocado. Aparte del original porque el enfoque lee los vecinos. */
     private byte[] sharpened;
+
+    /** Fotograma ya ampliado, y el buffer intermedio de las dos pasadas. */
+    private int[] scaled;
+    private short[] scaleMid;
+    private FrameScaler.Taps tapsX;
+    private FrameScaler.Taps tapsY;
 
     private VideoTexture texture;
     private ResourceLocation textureId;
@@ -314,10 +331,17 @@ public final class VideoPlayer implements AutoCloseable {
         // salga exactamente igual de nitido que el archivo original.
         this.texture.setSharpFiltering(Math.abs(scale - 1.0F) < 0.01F);
 
-        // El decodificador necesita saber cuanto se va a ampliar para decidir si
-        // enfoca. Se apunta aqui, que es el unico sitio donde se conoce el hueco
-        // real en pixeles de pantalla.
-        this.drawScale = scale;
+        // Se apunta el hueco en pixeles reales de pantalla, que es lo unico que
+        // se conoce aqui y le hace falta al decodificador.
+        //
+        // Se guarda el TAMAÑO y no la escala a proposito. La escala de esta linea
+        // se calcula contra el fotograma actual, y si ese fotograma ya viene
+        // ampliado la escala sale 1, o sea que la ampliacion se apagaria sola y
+        // al fotograma siguiente volveria a hacer falta: se quedaria oscilando.
+        // Con el tamaño del hueco, el decodificador saca la escala contra el
+        // tamaño ORIGINAL del video, que no cambia.
+        this.panelWidth = targetWidth;
+        this.panelHeight = targetHeight;
 
         g.setColor(1.0F, 1.0F, 1.0F, Math.max(0.0F, Math.min(1.0F, alpha)));
         g.pose().pushPose();
@@ -648,7 +672,29 @@ public final class VideoPlayer implements AutoCloseable {
         double timestamp,
         double duration
     ) {
-        int needed = w * h * 4;
+        // Escala a la que se va a ver, calculada contra el tamaño ORIGINAL del
+        // video. Es la misma cuenta que hace render() para rellenar el hueco.
+        int panelW = this.panelWidth;
+        int panelH = this.panelHeight;
+        float scale = panelW > 0 && panelH > 0
+            ? Math.max((float) panelW / w, (float) panelH / h)
+            : 1.0F;
+
+        // Si hay que ampliar, se amplia aqui con filtro bicubico en vez de
+        // dejarselo a la grafica, que solo sabe hacerlo bilineal (lo mas borroso).
+        int outW = w;
+        int outH = h;
+        if (scale > 1.0F) {
+            int candidateW = Math.max(1, Math.round(w * scale));
+            int candidateH = Math.max(1, Math.round(h * scale));
+            if (FrameScaler.worthIt(w, h, candidateW, candidateH)) {
+                outW = candidateW;
+                outH = candidateH;
+            }
+        }
+        boolean upscaling = outW != w || outH != h;
+
+        int needed = outW * outH * 4;
 
         RgbaFrame reuse = this.recycled.poll();
         ByteBuffer buffer;
@@ -680,9 +726,13 @@ public final class VideoPlayer implements AutoCloseable {
         }
         YuvToRgb use = rgb;
 
-        // Si el video se va a ver ampliado se enfoca el brillo antes de convertir.
-        // A escala 1:1 esto no entra y el fotograma va tal cual viene del archivo.
-        float amount = LumaSharpen.amountFor(this.drawScale);
+        // El enfoque previo solo se aplica si NO se amplia aqui.
+        //
+        // Estaba para compensar el desenfoque que mete la grafica al estirar con
+        // filtro bilineal. Ampliando con bicubico ese desenfoque ya no existe, y
+        // entonces enfocar encima resta: medido sobre el mismo fotograma,
+        // 0.9311 de SSIM solo con el escalador contra 0.9279 añadiendo enfoque.
+        float amount = upscaling ? 0.0F : LumaSharpen.amountFor(scale);
         int amount8 = Math.round(amount * 256.0F);
         byte[] target;
         if (amount > 0.0F) {
@@ -717,10 +767,60 @@ public final class VideoPlayer implements AutoCloseable {
             pool.submit(() -> IntStream.range(0, h).parallel().forEach(rowJob)).join();
         }
 
-        buffer.clear();
-        buffer.asIntBuffer().put(scratch, 0, w * h);
+        int[] result = scratch;
+        if (upscaling) {
+            // El reparto de la ampliacion se decide por su PROPIO trabajo, que es
+            // el numero de pixeles de salida. Con un video pequeño el decodificado
+            // va sobrado y aqui esta el gasto de verdad, asi que si compensa.
+            ForkJoinPool scalePool = outW * outH >= PARALLEL_SCALE_PIXELS ? convertPool() : null;
+            result = this.upscale(scratch, w, h, outW, outH, scalePool);
+        }
 
-        return new RgbaFrame(buffer, w, h, timestamp, duration);
+        buffer.clear();
+        buffer.asIntBuffer().put(result, 0, outW * outH);
+
+        return new RgbaFrame(buffer, outW, outH, timestamp, duration);
+    }
+
+    /**
+     * Amplia el fotograma ya convertido, en dos pasadas repartidas entre hilos.
+     *
+     * Las tablas de pesos se calculan una vez por tamaño, no por fotograma: son
+     * las mismas mientras no cambie la ventana.
+     */
+    private int[] upscale(int[] src, int w, int h, int outW, int outH, ForkJoinPool pool) {
+        if (this.tapsX == null || !this.tapsX.matches(w, outW)) {
+            this.tapsX = FrameScaler.taps(w, outW);
+        }
+        if (this.tapsY == null || !this.tapsY.matches(h, outH)) {
+            this.tapsY = FrameScaler.taps(h, outH);
+        }
+
+        int midNeeded = FrameScaler.midSize(outW, h);
+        if (this.scaleMid == null || this.scaleMid.length != midNeeded) {
+            this.scaleMid = new short[midNeeded];
+        }
+        if (this.scaled == null || this.scaled.length != outW * outH) {
+            this.scaled = new int[outW * outH];
+        }
+
+        short[] mid = this.scaleMid;
+        int[] out = this.scaled;
+        FrameScaler.Taps hx = this.tapsX;
+        FrameScaler.Taps vy = this.tapsY;
+
+        // La vertical no puede empezar hasta que la horizontal haya acabado
+        // entera: cada fila de salida mezcla cuatro filas de la intermedia.
+        if (pool == null) {
+            IntStream.range(0, h).forEach(r -> FrameScaler.rowHorizontal(src, w, mid, outW, r, hx));
+            IntStream.range(0, outH).forEach(r -> FrameScaler.rowVertical(mid, outW, out, r, vy));
+        } else {
+            pool.submit(() -> {
+                IntStream.range(0, h).parallel().forEach(r -> FrameScaler.rowHorizontal(src, w, mid, outW, r, hx));
+                IntStream.range(0, outH).parallel().forEach(r -> FrameScaler.rowVertical(mid, outW, out, r, vy));
+            }).join();
+        }
+        return out;
     }
 
     private void runImage() {

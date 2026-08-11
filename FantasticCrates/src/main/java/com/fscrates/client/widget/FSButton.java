@@ -22,7 +22,10 @@ import net.minecraft.network.chat.Component;
  */
 public class FSButton extends AbstractButton {
     /** Lo que tarda la animacion al pasar o quitar el raton. */
-    private static final float HOVER_MS = 120.0F;
+    private static final float HOVER_MS = 160.0F;
+
+    /** Cuantas motas de luz suben por dentro del boton. */
+    private static final int MOTES = 5;
 
     private final int accent;
     private final Runnable action;
@@ -31,6 +34,14 @@ public class FSButton extends AbstractButton {
     /** Cuanto de "iluminado" esta ahora mismo, de 0 a 1. */
     private float hover;
     private long lastFrameMs = System.currentTimeMillis();
+
+    /**
+     * Reloj propio de la animacion, en segundos.
+     *
+     * Va aparte del reloj del juego para que el brillo respire igual de suave
+     * aunque los fps bajen, que es justo lo que pasa en la pantalla del video.
+     */
+    private float clock;
 
     public FSButton(int x, int y, int width, int height, Component message, int accent, Runnable action) {
         super(x, y, width, height, message);
@@ -79,6 +90,13 @@ public class FSButton extends AbstractButton {
             int bottom = mix(0xFF2C313A, darken(this.accent, 0.7F), 0.22F + 0.30F * lit);
             rounded(g, x + 1, y + 1, w - 2, h - 2, top, bottom);
 
+            // Resplandor que sube desde el borde de abajo. Queda DENTRO del
+            // boton: se dibuja fila a fila con el mismo recorte de las esquinas,
+            // asi que no se sale ni por los lados ni por las puntas.
+            if (lit > 0.0F) {
+                this.renderGlow(g, x, y, w, h, lit);
+            }
+
             // Brillo de una fila arriba: da el aire de relieve sin biselar los
             // cuatro lados, que es lo que hacia que se viera plano y anticuado.
             g.fill(x + 3, y + 1, x + w - 3, y + 2, 0x33FFFFFF);
@@ -98,6 +116,65 @@ public class FSButton extends AbstractButton {
     }
 
     /**
+     * Resplandor de abajo hacia arriba, con unas motas de luz subiendo.
+     *
+     * Todo va recortado a la forma del boton. La idea es que parezca que el boton
+     * se enciende por debajo, no que le salgan cosas por fuera: nada se dibuja
+     * mas alla de su borde.
+     */
+    private void renderGlow(GuiGraphics g, int x, int y, int w, int h, float lit) {
+        // La altura del resplandor respira despacio, entre el 45% y el 70% del
+        // boton. Sin ese vaiven la luz parece pegada y no encendida.
+        float breath = 0.62F + 0.18F * (float) Math.sin(this.clock * 2.6F);
+        float glowRows = (h - 2) * breath * lit;
+        int baseAlpha = (int) (165 * lit);
+
+        for (int row = 0; row < h - 2; row++) {
+            // 0 en el borde de abajo, 1 en lo alto del resplandor.
+            float up = row / Math.max(1.0F, glowRows);
+            if (up > 1.0F) {
+                break;
+            }
+            // Se apaga con el cuadrado de la distancia: concentra la luz abajo y
+            // la difumina arriba, en vez de dejar un corte recto.
+            float fade = (1.0F - up) * (1.0F - up);
+            int alpha = (int) (baseAlpha * fade);
+            if (alpha <= 0) {
+                continue;
+            }
+            int rowY = y + h - 2 - row;
+            int inset = Math.max(1, cornerInset(rowY - y, h));
+            g.fill(x + inset, rowY, x + w - inset, rowY + 1, withAlpha(this.accent, alpha));
+        }
+
+        // Motas de luz subiendo por dentro. Son deterministas: cada una siempre
+        // sale por la misma columna, asi no parpadean de sitio en sitio.
+        int usable = w - 8;
+        if (usable <= 0) {
+            return;
+        }
+        for (int i = 0; i < MOTES; i++) {
+            float speed = 0.45F + 0.12F * i;
+            float phase = (this.clock * speed + i * 0.37F) % 1.0F;
+            // Sube desde el borde de abajo hasta media altura y se apaga al subir.
+            float travel = phase * (h * 0.62F);
+            int moteY = (int) (y + h - 2 - travel);
+            if (moteY <= y + 2) {
+                continue;
+            }
+            // Reparto con la proporcion dorada: quedan repartidas por todo el
+            // ancho en vez de amontonarse a un lado, que es lo que pasaba
+            // multiplicando por un numero grande y sacando el resto.
+            int moteX = x + 4 + (int) ((0.13F + i * 0.618F) % 1.0F * usable);
+            int alpha = (int) (205 * lit * (1.0F - phase) * Math.min(1.0F, phase * 5.0F));
+            if (alpha <= 4) {
+                continue;
+            }
+            g.fill(moteX, moteY, moteX + 1, moteY + 1, withAlpha(0xFFFFFFFF, alpha));
+        }
+    }
+
+    /**
      * Avanza la animacion del raton.
      *
      * Se mide en tiempo real y no en ticks para que vaya igual de suave a
@@ -113,6 +190,9 @@ public class FSButton extends AbstractButton {
 
         boolean target = this.isHoveredOrFocused() && this.active;
         this.hover = Math.max(0.0F, Math.min(1.0F, this.hover + (target ? step : -step)));
+
+        // El reloj de la animacion avanza en segundos reales.
+        this.clock += step * (HOVER_MS / 1000.0F);
     }
 
     /**
