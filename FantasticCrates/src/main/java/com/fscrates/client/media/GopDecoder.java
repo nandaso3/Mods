@@ -145,10 +145,26 @@ final class GopDecoder implements AutoCloseable {
                 return null;
             }
 
-            // Hilos segun la CPU disponible: 2 para lo normal y hasta 4 en equipos
-            // grandes, que es lo que hace falta para un 1080p a 60 fps.
-            // Se deja siempre la mitad de los nucleos libres para el juego.
-            int workers = Math.max(2, Math.min(4, cores / 4));
+            // Hilos segun la CPU disponible.
+            //
+            // Antes era cores/4, que en un equipo normal de 8 nucleos daba 2 y
+            // habria necesitado 16 nucleos para llegar a 4. Medido en 8 nucleos
+            // con el video 1080p de 842 fotogramas, dos pasadas por
+            // configuracion y descartando el calentamiento:
+            //
+            //   2 hilos -> 52 fps sostenidos
+            //   3 hilos -> 62 fps      <- el mejor
+            //   4 hilos -> 59 fps
+            //
+            // Con 3 se gana un 19% y se pasa de 60, que es lo que hace falta para
+            // que un video de 60 fps se vea de verdad a 60 y no a 52. Con 4 ya
+            // empieza a competir con el hilo que convierte los fotogramas y con
+            // el propio juego, y rinde menos.
+            //
+            // La cuenta deja la mitad de los nucleos libres: con 8 son 3 de
+            // decodificado mas 1 de conversion, o sea 4 ocupados y 4 para el
+            // juego.
+            int workers = Math.max(2, Math.min(4, cores / 2 - 1));
             GopDecoder decoder = new GopDecoder(file, workers, seekFrames, total);
             FSCrates.LOGGER.info(
                 "[FSCrates] Video '{}': {} fotogramas, {} GOPs, decodificando con {} hilos.",
