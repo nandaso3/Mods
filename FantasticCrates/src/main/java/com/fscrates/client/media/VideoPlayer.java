@@ -64,8 +64,15 @@ public final class VideoPlayer implements AutoCloseable {
     private static final double DEFAULT_FRAME_SECONDS = 1.0 / 24.0;
     /** Si nos retrasamos mas que esto, resincronizamos en vez de acelerar. */
     private static final double MAX_DRIFT_SECONDS = 0.4;
-    /** A partir de este tamano de fotograma se reparte la conversion entre hilos. */
-    private static final int PARALLEL_CONVERT_PIXELS = 1_100_000;
+    /**
+     * A partir de este tamano de fotograma se reparte la conversion entre hilos.
+     *
+     * Esta alto a proposito: convertir un fotograma 1080p cuesta unos 7 ms, y
+     * repartirlo no ahorra CPU (solo la mueve de sitio) mientras que si anade
+     * hilos despertandose 30 veces por segundo. Solo compensa por encima de
+     * 1440p, donde ya son mas de 12 ms.
+     */
+    private static final int PARALLEL_CONVERT_PIXELS = 2_500_000;
 
     private static int textureSequence;
     private static ForkJoinPool convertPool;
