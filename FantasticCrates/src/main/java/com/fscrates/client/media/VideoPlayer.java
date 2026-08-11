@@ -78,7 +78,14 @@ public final class VideoPlayer implements AutoCloseable {
     private static int textureSequence;
     private static ForkJoinPool convertPool;
 
-    private final Path file;
+    /**
+     * El archivo que se reproduce.
+     *
+     * No es final porque al arrancar puede cambiarse por una copia sin las pistas
+     * de audio (ver Mp4Sanitizer). Volatil porque lo escribe el hilo que arranca
+     * la reproduccion y lo leen el de decodificado y el de render.
+     */
+    private volatile Path file;
     private final boolean staticImage;
     private final boolean unsupported;
 
@@ -238,6 +245,12 @@ public final class VideoPlayer implements AutoCloseable {
         if (this.staticImage) {
             task = this::runImage;
         } else {
+            // Antes de abrir nada se apartan las pistas que no son de video: si
+            // el decodificador tropieza con la de audio no abre el archivo ni
+            // aunque el video este perfecto. Tiene que ir aqui, que es por donde
+            // pasan las dos rutas (un hilo y varios).
+            this.file = Mp4Sanitizer.prepare(this.file);
+
             // Se intenta el decodificado en paralelo; si el archivo no lo permite
             // se usa un solo hilo, como siempre.
             GopDecoder parallel = GopDecoder.tryCreate(this.file);

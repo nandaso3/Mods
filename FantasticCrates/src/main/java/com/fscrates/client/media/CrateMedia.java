@@ -45,24 +45,32 @@ public final class CrateMedia {
 
         List<String> videoUrls = validUrls(config == null ? null : config.videos);
         List<String> musicUrls = validUrls(config == null ? null : config.music);
-        boolean custom = !videoUrls.isEmpty() || !musicUrls.isEmpty();
-        usingDefaults = !custom;
 
-        if (custom) {
-            // Media personalizada del admin: se descarga y se cachea en disco.
-            // Nunca se mezcla con la del mod, ni siquiera mientras carga.
-            FSCrates.LOGGER.info(
-                "[FSCrates] Media personalizada: {} video(s) y {} cancion(es) configuradas; no se usa la del mod.",
-                videoUrls.size(),
-                musicUrls.size()
-            );
-            videoFuture = videoUrls.isEmpty() ? null : MediaCache.obtain(pick(videoUrls), MediaCache.Kind.VIDEO);
-            musicFuture = musicUrls.isEmpty() ? null : MediaCache.obtain(pick(musicUrls), MediaCache.Kind.MUSIC);
-        } else {
-            // Media por defecto empaquetada en el JAR.
-            videoFuture = CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.videos()));
-            musicFuture = CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.music()));
-        }
+        // El video y la musica se deciden por separado. Antes bastaba con
+        // configurar UNA de las dos para que la otra se quedara en nada: si
+        // ponias tu video y dejabas la musica vacia, la escena iba en silencio.
+        // Lo vacio significa "usa la del mod", no "que no suene"; para el
+        // silencio esta el boton de volumen.
+        boolean customVideo = !videoUrls.isEmpty();
+        boolean customMusic = !musicUrls.isEmpty();
+
+        // El poster es la imagen fija del video del mod, y solo vale mientras
+        // carga ese video. Con un video propio no se pinta nada de fondo hasta
+        // que llega el suyo, para no colar el del mod ni un instante.
+        usingDefaults = !customVideo;
+
+        FSCrates.LOGGER.info(
+            "[FSCrates] Media de la escena: video {}, musica {}.",
+            customVideo ? videoUrls.size() + " propio(s)" : "el del mod",
+            customMusic ? musicUrls.size() + " propia(s)" : "la del mod"
+        );
+
+        videoFuture = customVideo
+            ? MediaCache.obtain(pick(videoUrls), MediaCache.Kind.VIDEO)
+            : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.videos()));
+        musicFuture = customMusic
+            ? MediaCache.obtain(pick(musicUrls), MediaCache.Kind.MUSIC)
+            : CompletableFuture.supplyAsync(() -> pickPath(DefaultMedia.music()));
     }
 
     /** Crea los reproductores en cuanto sus archivos estan listos. */
