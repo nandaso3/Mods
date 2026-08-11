@@ -1,0 +1,33 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+issueTrackerURL="https://github.com"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="${mod_authors}"
+description='''
+Mod de proteccion de zonas: 10 tiers usando concretos vanilla, flags por proteccion, panel admin y persistencia JSON. Forge 1.20.1.
+Incluye visualizacion del area con particulas (server-side, visible en clientes vanilla), mensaje de bienvenida y de salida configurables.
+Compatible con servidores hibridos (Mohist / Arclight / Magma): la entrada de texto de los menus se captura a nivel de paquete, por lo que
+funciona aunque los plugins de chat consuman el mensaje.
+'''
+
+[[dependencies.${mod_id}]]
+    modId="forge"
+    mandatory=true
+    versionRange="${forge_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    mandatory=true
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="BOTH"
+
+[[mixins]]
+config="${mod_id}.mixins.json"
