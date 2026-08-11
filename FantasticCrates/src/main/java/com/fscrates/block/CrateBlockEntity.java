@@ -5,6 +5,8 @@ import com.fscrates.animation.CrateAnimation;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.ParticleLayer;
 import com.fscrates.config.Rarity;
+import com.fscrates.crate.CrateRegistry;
+import net.minecraft.server.level.ServerLevel;
 import com.fscrates.registry.ModRegistry;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -46,6 +48,8 @@ import org.joml.Vector3f;
 
 public class CrateBlockEntity extends BlockEntity {
     private CrateConfig config = new CrateConfig();
+    /** Ultima generacion del registro que ya se aplico a esta caja. */
+    private int seenRegistryGeneration = -1;
     public static final float P_ANTICIPATION_END = 0.1F;
     public static final float P_OPEN_END = 0.22F;
     public static final float P_REVEAL_END = 0.9F;
@@ -363,6 +367,45 @@ public class CrateBlockEntity extends BlockEntity {
             }
         } else {
             return 0.0F;
+        }
+    }
+
+    /**
+     * Refresca la copia local del config cuando se recargan las definiciones
+     * (/fscrate reload).
+     *
+     * Cada caja colocada guarda su propio CrateConfig, asi que recargar el
+     * registro no bastaba: los cambios no se veian hasta romper y volver a poner
+     * la caja. Aqui se compara la "generacion" del registro y, si cambio, se
+     * vuelve a leer la definicion y se re-sincroniza a los clientes.
+     *
+     * Se hace por tick en vez de recorriendo el mundo entero para que tambien
+     * funcione con las cajas que estan en chunks que se cargan mas tarde.
+     */
+    public static void serverTick(Level level, BlockPos pos, BlockState state, CrateBlockEntity be) {
+        int generation = CrateRegistry.generation();
+        if (be.seenRegistryGeneration == generation) {
+            return;
+        }
+        be.seenRegistryGeneration = generation;
+
+        if (!(level instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        String id = be.config == null ? null : be.config.id;
+        if (id == null || id.isBlank()) {
+            return;
+        }
+
+        CrateConfig fresh = CrateRegistry.get(serverLevel).get(id);
+        if (fresh == null) {
+            return;
+        }
+
+        // Solo se re-sincroniza si de verdad cambio algo.
+        if (!fresh.save().equals(be.config.save())) {
+            be.setConfig(fresh.copy());
         }
     }
 

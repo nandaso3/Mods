@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
+import java.util.stream.Stream;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -96,6 +97,41 @@ public final class MediaCache {
         return folderFor(kind).resolve(hash(url) + extensionOf(url, kind));
     }
 
+    /**
+     * Busca en la cache cualquier archivo de este url, sea cual sea su extension.
+     *
+     * Se busca por hash y no por nombre completo a proposito: la extension se
+     * decide al descargar segun el contenido real, asi que no se puede adivinar
+     * desde el url. Si solo se mirase el nombre exacto, un PNG guardado como
+     * .png no se encontraria y se volveria a descargar cada vez.
+     */
+    public static Path findCached(String url, Kind kind) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+
+        String prefix = hash(url.trim());
+        Path exact = cacheFileFor(url.trim(), kind);
+        if (isReady(exact)) {
+            return exact;
+        }
+
+        Path folder = folderFor(kind);
+        if (!Files.isDirectory(folder)) {
+            return null;
+        }
+        try (Stream<Path> files = Files.list(folder)) {
+            return files
+                .filter(p -> p.getFileName().toString().startsWith(prefix + "."))
+                .filter(p -> !p.getFileName().toString().endsWith(".part"))
+                .filter(MediaCache::isReady)
+                .findFirst()
+                .orElse(null);
+        } catch (IOException e) {
+            return null;
+        }
+    }
+
     /** Un archivo en cache es valido si existe y tiene tamano &gt; 0. */
     public static boolean isReady(Path file) {
         try {
@@ -106,7 +142,7 @@ public final class MediaCache {
     }
 
     public static boolean isCached(String url, Kind kind) {
-        return isReady(cacheFileFor(url, kind));
+        return findCached(url, kind) != null;
     }
 
     /**
@@ -120,19 +156,27 @@ public final class MediaCache {
         }
 
         final String clean = url.trim();
-        final Path target = cacheFileFor(clean, kind);
-        if (isReady(target)) {
-            return CompletableFuture.completedFuture(target);
+
+        // Ya esta en disco: se usa tal cual, sin volver a descargar nunca.
+        Path cached = findCached(clean, kind);
+        if (cached != null) {
+            FSCrates.LOGGER.debug("[FSCrates] Media ya en cache, no se descarga: {}", cached.getFileName());
+            return CompletableFuture.completedFuture(cached);
         }
 
         String key = kind.name() + "|" + clean;
         return IN_FLIGHT.computeIfAbsent(key, k -> CompletableFuture.supplyAsync(() -> {
             try {
-                if (isReady(target)) {
-                    return target;
+                Path existing = findCached(clean, kind);
+                if (existing != null) {
+                    return existing;
                 }
-                downloadTo(clean, target);
-                FSCrates.LOGGER.info("[FSCrates] Media descargada en cache: {}", target.getFileName());
+                Path target = downloadTo(clean, cacheFileFor(clean, kind));
+                FSCrates.LOGGER.info(
+                    "[FSCrates] Media descargada y guardada en cache: {} ({})",
+                    target.getFileName(),
+                    sniff(target)
+                );
                 return target;
             } catch (Exception e) {
                 FSCrates.LOGGER.error("[FSCrates] No se pudo descargar la media '{}': {}", clean, e.toString());
@@ -143,8 +187,13 @@ public final class MediaCache {
         }, DOWNLOADER));
     }
 
-    /** Descarga atomica: escribe a un .part y luego renombra. */
-    private static void downloadTo(String url, Path target) throws IOException {
+    /**
+     * Descarga atomica: escribe a un .part, mira que tipo de archivo es de
+     * verdad y lo renombra con la extension correcta.
+     *
+     * @return la ruta definitiva en cache
+     */
+    private static Path downloadTo(String url, Path target) throws IOException {
         Files.createDirectories(target.getParent());
         Path part = target.resolveSibling(target.getFileName() + ".part");
 
@@ -161,7 +210,18 @@ public final class MediaCache {
             throw new IOException("la descarga quedo vacia");
         }
 
-        Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
+        // La extension real se decide por el contenido, no por el url.
+        MediaType type = sniff(part);
+        Path finalTarget = target;
+        if (type != MediaType.UNKNOWN && !target.getFileName().toString().endsWith(type.extension())) {
+            String name = target.getFileName().toString();
+            int dot = name.lastIndexOf('.');
+            String base = dot > 0 ? name.substring(0, dot) : name;
+            finalTarget = target.resolveSibling(base + type.extension());
+        }
+
+        Files.move(part, finalTarget, StandardCopyOption.REPLACE_EXISTING);
+        return finalTarget;
     }
 
     /**
@@ -294,6 +354,102 @@ public final class MediaCache {
             }
             return out.toString(StandardCharsets.UTF_8);
         }
+    }
+
+    /** Tipo real de un archivo, deducido de su contenido. */
+    public enum MediaType {
+        MP4(".mp4", true),
+        WEBM(".webm", true),
+        PNG(".png", true),
+        JPEG(".jpg", true),
+        GIF(".gif", true),
+        MP3(".mp3", false),
+        OGG(".ogg", false),
+        WAV(".wav", false),
+        UNKNOWN("", false);
+
+        private final String extension;
+        private final boolean visual;
+
+        MediaType(String extension, boolean visual) {
+            this.extension = extension;
+            this.visual = visual;
+        }
+
+        public String extension() {
+            return this.extension;
+        }
+
+        /** true si es video o imagen (va al fondo de la pantalla). */
+        public boolean isVisual() {
+            return this.visual;
+        }
+
+        public boolean isImage() {
+            return this == PNG || this == JPEG || this == GIF;
+        }
+    }
+
+    /**
+     * Detecta el tipo por los bytes de cabecera (numeros magicos).
+     *
+     * Hace falta porque los links directos de Google Drive no llevan extension:
+     * por el url es imposible saber si lo que viene es un MP4 o un PNG.
+     */
+    public static MediaType sniff(Path file) {
+        if (file == null) {
+            return MediaType.UNKNOWN;
+        }
+
+        byte[] head = new byte[32];
+        int read;
+        try (InputStream in = Files.newInputStream(file)) {
+            read = in.readNBytes(head, 0, head.length);
+        } catch (IOException e) {
+            return MediaType.UNKNOWN;
+        }
+        if (read < 12) {
+            return MediaType.UNKNOWN;
+        }
+
+        // PNG: 89 50 4E 47 0D 0A 1A 0A
+        if (head[0] == (byte) 0x89 && head[1] == 'P' && head[2] == 'N' && head[3] == 'G') {
+            return MediaType.PNG;
+        }
+        // JPEG: FF D8 FF
+        if (head[0] == (byte) 0xFF && head[1] == (byte) 0xD8 && head[2] == (byte) 0xFF) {
+            return MediaType.JPEG;
+        }
+        // GIF87a / GIF89a
+        if (head[0] == 'G' && head[1] == 'I' && head[2] == 'F') {
+            return MediaType.GIF;
+        }
+        // Matroska / WebM: 1A 45 DF A3
+        if (head[0] == (byte) 0x1A && head[1] == (byte) 0x45 && head[2] == (byte) 0xDF && head[3] == (byte) 0xA3) {
+            return MediaType.WEBM;
+        }
+        // MP4 / MOV: "....ftyp"
+        if (head[4] == 'f' && head[5] == 't' && head[6] == 'y' && head[7] == 'p') {
+            return MediaType.MP4;
+        }
+        // OGG: "OggS"
+        if (head[0] == 'O' && head[1] == 'g' && head[2] == 'g' && head[3] == 'S') {
+            return MediaType.OGG;
+        }
+        // WAV: "RIFF....WAVE"
+        if (head[0] == 'R' && head[1] == 'I' && head[2] == 'F' && head[3] == 'F'
+            && head[8] == 'W' && head[9] == 'A' && head[10] == 'V' && head[11] == 'E') {
+            return MediaType.WAV;
+        }
+        // MP3: "ID3" o sincronismo de frame FF Ex/Fx
+        if (head[0] == 'I' && head[1] == 'D' && head[2] == '3') {
+            return MediaType.MP3;
+        }
+        if (head[0] == (byte) 0xFF && (head[1] & 0xE0) == 0xE0) {
+            return MediaType.MP3;
+        }
+
+        return MediaType.UNKNOWN;
     }
 
     /** Extension deducida del url; si no se reconoce se usa la del tipo de media. */

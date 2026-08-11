@@ -36,6 +36,11 @@ public class FSButton extends AbstractButton {
         }
     }
 
+    /**
+     * Estilo clasico tipo Minecraft: gris con biselado (claro arriba, oscuro
+     * abajo) y borde negro. El color de acento solo se usa como toque sutil en
+     * el borde al pasar el raton, para no romper el aire vanilla.
+     */
     @Override
     protected void renderWidget(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         int x = this.getX();
@@ -44,34 +49,47 @@ public class FSButton extends AbstractButton {
         int h = this.getHeight();
         boolean hovered = this.isHoveredOrFocused() && this.active;
 
-        // Sombra inferior.
-        g.fill(x + 1, y + h, x + w - 1, y + h + 1, 0x50000000);
+        // Borde exterior negro.
+        g.fill(x, y, x + w, y + h, 0xFF000000);
 
-        int base = this.active ? (hovered ? 0xFF2C3340 : 0xFF20242E) : 0xFF191C23;
-        g.fill(x, y, x + w, y + h, base);
-
-        // Degradado interior para dar volumen.
-        g.fillGradient(x + 1, y + 1, x + w - 1, y + h - 1, hovered ? 0x28FFFFFF : 0x14FFFFFF, 0x00FFFFFF);
-
-        // Borde: usa el acento cuando esta activo o el raton encima.
-        int border = this.active ? (hovered ? this.accent : mix(this.accent, 0xFF000000, 0.45F)) : 0xFF2A2E38;
-        g.fill(x, y, x + w, y + 1, border);
-        g.fill(x, y + h - 1, x + w, y + h, border);
-        g.fill(x, y, x + 1, y + h, border);
-        g.fill(x + w - 1, y, x + w, y + h, border);
-
-        // Barrita de acento a la izquierda.
-        if (this.active) {
-            g.fill(x + 1, y + 1, x + 3, y + h - 1, hovered ? this.accent : mix(this.accent, 0xFF000000, 0.25F));
+        int face;
+        int light;
+        int dark;
+        if (!this.active) {
+            face = 0xFF4A4A4A;
+            light = 0xFF5C5C5C;
+            dark = 0xFF303030;
+        } else if (hovered) {
+            face = 0xFF9098A6;
+            light = 0xFFB6BECB;
+            dark = 0xFF565D6B;
+        } else {
+            face = 0xFF6E6E6E;
+            light = 0xFF8C8C8C;
+            dark = 0xFF3F3F3F;
         }
 
-        int textColor = this.active ? 0xFFFFFFFF : 0xFF6E7480;
+        // Cara del boton.
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, face);
+        // Biselado: brillo arriba y a la izquierda, sombra abajo y a la derecha.
+        g.fill(x + 1, y + 1, x + w - 1, y + 2, light);
+        g.fill(x + 1, y + 1, x + 2, y + h - 1, light);
+        g.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, dark);
+        g.fill(x + w - 2, y + 1, x + w - 1, y + h - 1, dark);
+
+        // Toque de acento en el borde inferior cuando el raton esta encima.
+        if (hovered) {
+            g.fill(x + 1, y + h - 1, x + w - 1, y + h, this.accent);
+        }
+
+        int textColor = this.active ? 0xFFFFFFFF : 0xFFA0A0A0;
         var font = Minecraft.getInstance().font;
-        int textY = y + (h - 8) / 2;
+        // Centrado exacto, tanto horizontal como vertical.
+        int textY = y + (h - font.lineHeight) / 2 + 1;
         if (this.centered) {
-            g.drawCenteredString(font, this.getMessage(), x + w / 2 + 1, textY, textColor);
+            g.drawCenteredString(font, this.getMessage(), x + w / 2, textY, textColor);
         } else {
-            g.drawString(font, this.getMessage(), x + 8, textY, textColor, false);
+            g.drawString(font, this.getMessage(), x + 6, textY, textColor, false);
         }
     }
 

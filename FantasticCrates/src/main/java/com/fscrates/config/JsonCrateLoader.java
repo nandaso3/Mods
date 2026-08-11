@@ -114,6 +114,12 @@ public final class JsonCrateLoader {
             }
         }
 
+        if (loaded > 0) {
+            registry.setDirty();
+            // Avisa a las cajas ya colocadas de que su copia del config caduco.
+            CrateRegistry.bumpGeneration();
+        }
+
         FSCrates.LOGGER.info("[FSCrates] Configuracion JSON recargada: {} caja(s) desde {}", loaded, dir);
         return loaded;
     }
@@ -213,6 +219,12 @@ public final class JsonCrateLoader {
         config.videos.addAll(strings(media, "videos"));
         config.music.clear();
         config.music.addAll(strings(media, "musica"));
+
+        JsonObject scene = section(json, "escena");
+        config.sceneHeader = string(scene, "lineaDeArriba", config.sceneHeader);
+        config.sceneSubtitle = string(scene, "lineaDeAbajo", config.sceneSubtitle);
+        config.sceneLines.clear();
+        config.sceneLines.addAll(strings(scene, "mensajeExtra"));
 
         config.rewards.clear();
         if (json.has("recompensas") && json.get("recompensas").isJsonArray()) {
@@ -433,6 +445,15 @@ public final class JsonCrateLoader {
         }
         root.add("probabilidadPorRareza", chances);
 
+        // ---- escena de pre-apertura (textos)
+        JsonObject scene = new JsonObject();
+        scene.addProperty("lineaDeArriba", config.sceneHeader == null ? "" : config.sceneHeader);
+        scene.addProperty("lineaDeAbajo", config.sceneSubtitle == null ? "" : config.sceneSubtitle);
+        JsonArray sceneLines = new JsonArray();
+        config.sceneLines.forEach(sceneLines::add);
+        scene.add("mensajeExtra", sceneLines);
+        root.add("escena", scene);
+
         // ---- media
         JsonObject media = new JsonObject();
         JsonArray videos = new JsonArray();
@@ -472,8 +493,10 @@ public final class JsonCrateLoader {
         help.addProperty("recompensas", "Aqui solo se pueden definir las de tipo ITEM. Las de COMMAND, XP, EFFECT y KEY se configuran en el editor del juego.");
         help.addProperty("probabilidad", "Es un peso relativo dentro de su rareza, no un porcentaje absoluto. El % real se calcula solo.");
         help.addProperty("garantizada", "Si es true la recompensa se entrega SIEMPRE, ademas de las que salgan por sorteo.");
-        help.addProperty("videos", "Links directos a MP4 con video H.264. Los .webm NO se pueden reproducir.");
+        help.addProperty("videos", "Links directos a MP4 (H.264) o a imagenes PNG/JPG. Los .webm NO se pueden reproducir. Si pones varios, en cada apertura sale uno al azar.");
         help.addProperty("musica", "Links directos a MP3, OGG o WAV.");
+        help.addProperty("escena", "Textos de la pantalla de pre-apertura. Se admiten colores con &.");
+        help.addProperty("cache", "Cada media se descarga UNA vez y se guarda en .minecraft/fscrates/cache/. Despues ya no se vuelve a bajar.");
         return help;
     }
 

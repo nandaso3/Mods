@@ -69,9 +69,13 @@ public class CrateBlock extends BaseEntityBlock {
 
     @Nullable
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
-        return level.isClientSide && type == ModRegistry.CRATE_BE.get()
+        if (type != ModRegistry.CRATE_BE.get()) {
+            return null;
+        }
+        // En cliente: animaciones. En servidor: refrescar el config tras un reload.
+        return level.isClientSide
             ? (lvl, pos, st, be) -> CrateBlockEntity.clientTick(lvl, pos, st, (CrateBlockEntity)be)
-            : null;
+            : (lvl, pos, st, be) -> CrateBlockEntity.serverTick(lvl, pos, st, (CrateBlockEntity)be);
     }
 
     public void setPlacedBy(Level level, BlockPos pos, BlockState state, @Nullable LivingEntity placer, ItemStack stack) {

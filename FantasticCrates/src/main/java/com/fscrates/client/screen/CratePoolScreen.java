@@ -1,5 +1,6 @@
 package com.fscrates.client.screen;
 
+import com.fscrates.client.media.CrateMedia;
 import com.fscrates.client.widget.ScrollbarDrag;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
@@ -138,6 +139,12 @@ public class CratePoolScreen extends Screen {
 
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+        // Se sigue viendo la escena de la pre-apertura detras (video y musica no
+        // se cortan): esta pantalla se abre ENCIMA, no en lugar de ella.
+        if (CrateMedia.isActive()) {
+            CrateMedia.renderBackground(g, this.width, this.height);
+        }
+
         g.fill(0, 0, this.width, this.height, -1610612736);
         FSGui.panel(g, this.leftPos, this.topPos, this.panelWidth, this.panelHeight);
 

@@ -5,6 +5,9 @@ import com.fscrates.config.JsonCrateLoader;
 import com.fscrates.config.RewardEntry;
 import com.fscrates.crate.CrateRegistry;
 import com.fscrates.crate.LootEngine;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Locale;
 import com.fscrates.item.CrateItems;
 import com.fscrates.network.FSNetwork;
 import com.fscrates.network.OpenEditorPacket;
@@ -72,7 +75,14 @@ public final class FSCrateCommand {
             ((LiteralArgumentBuilder)Commands.literal("delete").executes(c -> usage(c, "/fscrate delete <crate>")))
                 .then(Commands.argument("crate", StringArgumentType.word()).suggests((c, b) -> suggestCrates(c, b)).executes(FSCrateCommand::delete))
         );
-        root.then(Commands.literal("reload").executes(FSCrateCommand::reload));
+        root.then(
+            ((LiteralArgumentBuilder)Commands.literal("reload").executes(FSCrateCommand::reload))
+                .then(
+                    Commands.argument("crate", StringArgumentType.word())
+                        .suggests((c, b) -> suggestCrates(c, b))
+                        .executes(FSCrateCommand::reloadOne)
+                )
+        );
         dispatcher.register(root);
     }
 
@@ -282,6 +292,42 @@ public final class FSCrateCommand {
                 true
             );
         return 1;
+    }
+
+    /** Recarga una sola caja desde su JSON. */
+    private static int reloadOne(CommandContext<CommandSourceStack> ctx) {
+        String id = StringArgumentType.getString(ctx, "crate").toLowerCase(Locale.ROOT);
+        Path file = JsonCrateLoader.fileFor(id);
+
+        if (!Files.isRegularFile(file)) {
+            ctx.getSource()
+                .sendFailure(Component.literal("\u00a7cNo existe \u00a7f" + file.getFileName() + "\u00a7c en config/fscrates/cajas/"));
+            return 0;
+        }
+
+        try {
+            CrateConfig config = JsonCrateLoader.read(file);
+            if (config == null) {
+                ctx.getSource().sendFailure(Component.literal("\u00a7cEl archivo no tiene un JSON v\u00e1lido."));
+                return 0;
+            }
+
+            CrateRegistry.get(ctx.getSource().getServer().overworld()).put(config);
+            // Hace que las cajas ya colocadas recojan el cambio.
+            CrateRegistry.bumpGeneration();
+
+            ctx.getSource()
+                .sendSuccess(
+                    () -> Component.literal(
+                            "\u00a7aRecargada \u00a7f" + config.id + "\u00a7a desde JSON \u00a77(" + config.rewards.size() + " recompensa(s))."
+                        ),
+                    true
+                );
+            return 1;
+        } catch (Exception e) {
+            ctx.getSource().sendFailure(Component.literal("\u00a7cError leyendo el archivo: \u00a7f" + e.getMessage()));
+            return 0;
+        }
     }
 
     private static int list(CommandContext<CommandSourceStack> ctx) {

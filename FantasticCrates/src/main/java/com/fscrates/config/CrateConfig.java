@@ -24,10 +24,16 @@ public class CrateConfig {
     public boolean floatingName = true;
     public boolean showOdds = false;
     public final List<String> floatingText = new ArrayList<>();
-    /** URLs directas de video para la pantalla de pre-apertura. */
+    /** URLs directas de video o imagen para la pantalla de pre-apertura. */
     public final List<String> videos = new ArrayList<>();
     /** URLs directas de musica para la pantalla de pre-apertura. */
     public final List<String> music = new ArrayList<>();
+    /** Linea que sale ENCIMA del nombre de la crate en la pre-apertura. */
+    public String sceneHeader = "\u00a7d\u2726 Fantastic Crates \u2726";
+    /** Linea que sale DEBAJO del nombre de la crate. */
+    public String sceneSubtitle = "\u00a77Prep\u00e1rate para abrir tu caja";
+    /** Lineas extra de texto libre, debajo del subtitulo. */
+    public final List<String> sceneLines = new ArrayList<>();
     public final List<ParticleLayer> particleLayers = new ArrayList<>();
     public boolean consumeKey = true;
     public boolean uniqueKeyEnabled = false;
@@ -185,6 +191,15 @@ public class CrateConfig {
         }
 
         tag.put("music", musicList);
+        tag.putString("sceneHeader", this.sceneHeader == null ? "" : this.sceneHeader);
+        tag.putString("sceneSubtitle", this.sceneSubtitle == null ? "" : this.sceneSubtitle);
+        ListTag sceneList = new ListTag();
+
+        for (String line : this.sceneLines) {
+            sceneList.add(StringTag.valueOf(line));
+        }
+
+        tag.put("sceneLines", sceneList);
         ListTag listTag = new ListTag();
 
         for (ParticleLayer layer : this.particleLayers) {
@@ -277,6 +292,21 @@ public class CrateConfig {
             if (url != null && !url.isBlank()) {
                 c.music.add(url);
             }
+        }
+
+        if (tag.contains("sceneHeader")) {
+            c.sceneHeader = tag.getString("sceneHeader");
+        }
+
+        if (tag.contains("sceneSubtitle")) {
+            c.sceneSubtitle = tag.getString("sceneSubtitle");
+        }
+
+        c.sceneLines.clear();
+        ListTag sceneList = tag.getList("sceneLines", 8);
+
+        for (int s = 0; s < sceneList.size(); s++) {
+            c.sceneLines.add(sceneList.getString(s));
         }
 
         c.particleLayers.clear();

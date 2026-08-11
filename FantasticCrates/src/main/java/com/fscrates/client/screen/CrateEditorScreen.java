@@ -65,6 +65,8 @@ public class CrateEditorScreen extends Screen {
     private String selectedMediaUrl;
     /** En Premios: coger items del inventario del jugador en vez del registro. */
     private boolean rewardsFromInventory;
+    /** Linea seleccionada en la pestana Mensajes. */
+    private String selectedSceneLine;
 
     /** Items que el jugador lleva encima, para la pestana de Premios. */
     private List<ItemStack> playerInventory() {
@@ -134,7 +136,97 @@ public class CrateEditorScreen extends Screen {
                 break;
             case MUSICA:
                 this.initMusica();
+                break;
+            case MENSAJES:
+                this.initMensajes();
         }
+    }
+
+    /**
+     * Textos que se muestran en la pantalla de pre-apertura, encima del video.
+     * Se admiten codigos de color con &amp; (por ejemplo &amp;d&amp;lHola).
+     */
+    private void initMensajes() {
+        this.helpLine = "Textos de la pantalla de pre-apertura. Usa & para colores (&a, &l, &d...).";
+        int x = this.bodyX();
+        int y = this.bodyY();
+        int w = this.bodyW();
+
+        this.addLabel("\u00a7e\u2726 Mensajes de la escena de pre-apertura", x, y, desc(
+            "Lo que ve el jugador antes de abrir la caja.",
+            "Se pueden usar codigos de color con &.",
+            "Deja un campo vac\u00edo para que no salga esa l\u00ednea."
+        ));
+
+        // --- Cabecera (encima del nombre de la crate)
+        this.addLabel("\u00a77L\u00ednea de arriba \u00a78(encima del nombre)", x, y + 16, null);
+        EditBox header = new EditBox(this.font, x, y + 26, w, 16, Component.empty());
+        header.setMaxLength(120);
+        header.setValue(this.config.sceneHeader == null ? "" : this.config.sceneHeader);
+        header.setHint(Component.literal("\u00a78&d\u2726 Fantastic Crates \u2726"));
+        header.setResponder(v -> this.config.sceneHeader = v);
+        this.addRenderableWidget(header);
+
+        // --- Nombre de la crate (el mismo campo que en INFO, por comodidad)
+        this.addLabel("\u00a77Nombre de la caja \u00a78(igual que en Info)", x, y + 48, null);
+        EditBox title = new EditBox(this.font, x, y + 58, w, 16, Component.empty());
+        title.setMaxLength(120);
+        title.setValue(this.config.displayName == null ? "" : this.config.displayName);
+        title.setResponder(v -> this.config.displayName = v);
+        this.addRenderableWidget(title);
+
+        // --- Subtitulo
+        this.addLabel("\u00a77L\u00ednea de abajo \u00a78(el \"prep\u00e1rate para abrir\")", x, y + 80, null);
+        EditBox subtitle = new EditBox(this.font, x, y + 90, w, 16, Component.empty());
+        subtitle.setMaxLength(160);
+        subtitle.setValue(this.config.sceneSubtitle == null ? "" : this.config.sceneSubtitle);
+        subtitle.setHint(Component.literal("\u00a78&7Prep\u00e1rate para abrir tu caja"));
+        subtitle.setResponder(v -> this.config.sceneSubtitle = v);
+        this.addRenderableWidget(subtitle);
+
+        // --- Lineas libres
+        this.addLabel("\u00a77Mensaje extra \u00a78(una l\u00ednea por rengl\u00f3n)", x, y + 112, desc(
+            "L\u00edneas libres debajo del subt\u00edtulo.",
+            "\u00daltil para avisos, eventos o normas."
+        ));
+        int listH = Math.max(34, this.bodyH() - 152);
+        ScrollSelector<String> lines = new ScrollSelector<>(
+            x, y + 122, w, listH, 14, line -> line, line -> line, null
+        );
+        lines.setItems(new ArrayList<>(this.config.sceneLines));
+        lines.onSelect(line -> this.selectedSceneLine = line);
+        this.addRenderableWidget(lines);
+
+        int rowY = y + 122 + listH + 4;
+        int addW = Math.max(70, this.font.width("A\u00f1adir") + 20);
+        EditBox extra = new EditBox(this.font, x, rowY, w - addW - 4, 16, Component.empty());
+        extra.setMaxLength(160);
+        extra.setHint(Component.literal("\u00a78Escribe una l\u00ednea y pulsa A\u00f1adir"));
+        this.addRenderableWidget(extra);
+
+        this.addRenderableWidget(Button.builder(Component.literal("\u00a7aA\u00f1adir"), b -> {
+            String value = extra.getValue() == null ? "" : extra.getValue();
+            if (!value.isBlank()) {
+                this.config.sceneLines.add(value);
+                extra.setValue("");
+                this.rebuildWidgets();
+            }
+        }).bounds(x + w - addW, rowY, addW, 16).build());
+
+        this.addRenderableWidget(
+            Button.builder(
+                    Component.literal(this.selectedSceneLine == null ? "\u00a78Quitar (elige una)" : "\u00a7cQuitar l\u00ednea"),
+                    b -> {
+                        if (this.selectedSceneLine != null) {
+                            this.config.sceneLines.remove(this.selectedSceneLine);
+                            this.selectedSceneLine = null;
+                            this.rebuildWidgets();
+                        }
+                    }
+                )
+                .bounds(x, rowY + 20, w, 16)
+                .build()
+        );
     }
 
     private int bodyX() {
@@ -1334,9 +1426,11 @@ public class CrateEditorScreen extends Screen {
             "V\u00eddeo",
             desc(
                 "Links DIRECTOS de descarga (Google Drive, etc.).",
-                "Formato recomendado: \u00a7fMP4 con v\u00eddeo H.264\u00a77.",
-                "\u00a7cOJO: los .webm (VP8/VP9) no se pueden reproducir.",
-                "Si hay varios, en cada apertura sale uno al azar."
+                "Se admiten \u00a7fv\u00eddeos MP4 (H.264)\u00a77 e \u00a7fim\u00e1genes PNG/JPG\u00a77.",
+                "\u00a7cLos .webm (VP8/VP9) no se pueden reproducir.",
+                "",
+                "Si hay varios, en cada apertura sale uno al azar.",
+                "Cada archivo se descarga una vez y queda en cach\u00e9."
             )
         );
     }
@@ -1899,7 +1993,8 @@ public class CrateEditorScreen extends Screen {
         KEYMODEL("Llave"),
         SETTINGS("Ajustes"),
         VIDEOS("Videos"),
-        MUSICA("M\u00fasica");
+        MUSICA("M\u00fasica"),
+        MENSAJES("Mensajes");
 
         final String label;
 

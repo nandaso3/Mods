@@ -111,18 +111,44 @@ public final class VideoPlayer implements AutoCloseable {
 
     public VideoPlayer(Path file) {
         this.file = file;
-        String name = file == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
-        this.staticImage = name.endsWith(".png") || name.endsWith(".jpg") || name.endsWith(".jpeg");
-        this.unsupported = name.endsWith(".webm") || name.endsWith(".mkv");
+
+        // El tipo se decide por el CONTENIDO del archivo, no por su nombre: los
+        // links directos de Google Drive no llevan extension, asi que por el url
+        // es imposible saber si viene un MP4 o un PNG.
+        MediaCache.MediaType type = MediaCache.sniff(file);
+        if (type == MediaCache.MediaType.UNKNOWN) {
+            type = typeFromName(file);
+        }
+
+        this.staticImage = type.isImage();
+        this.unsupported = type == MediaCache.MediaType.WEBM;
 
         if (this.unsupported) {
             this.failed = true;
             FSCrates.LOGGER.warn(
-                "[FSCrates] El formato WEBM no se puede reproducir (VP8/VP9 no tiene decodificador en Java puro). "
-                    + "Convierte '{}' a MP4 (H.264) para usarlo como video de crate.",
-                name
+                "[FSCrates] '{}' es un WEBM y no se puede reproducir (VP8/VP9 no tiene decodificador en Java puro). "
+                    + "Convertelo a MP4 (H.264) o usa una imagen PNG/JPG.",
+                file == null ? "?" : file.getFileName()
             );
         }
+    }
+
+    /** Ultimo recurso si el contenido no se reconoce: mirar la extension. */
+    private static MediaCache.MediaType typeFromName(Path file) {
+        String name = file == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
+        if (name.endsWith(".png")) {
+            return MediaCache.MediaType.PNG;
+        }
+        if (name.endsWith(".jpg") || name.endsWith(".jpeg")) {
+            return MediaCache.MediaType.JPEG;
+        }
+        if (name.endsWith(".gif")) {
+            return MediaCache.MediaType.GIF;
+        }
+        if (name.endsWith(".webm") || name.endsWith(".mkv")) {
+            return MediaCache.MediaType.WEBM;
+        }
+        return MediaCache.MediaType.MP4;
     }
 
     public void start() {
@@ -146,7 +172,15 @@ public final class VideoPlayer implements AutoCloseable {
 
     // ------------------------------------------------------------------ render
 
-    /** Dibuja el fotograma actual cubriendo el area (estilo "cover"). */
+    /**
+     * Dibuja el fotograma actual cubriendo el area (estilo "cover").
+     *
+     * IMPORTANTE: se dibuja a resolucion REAL de pantalla, no en coordenadas de
+     * GUI. Las coordenadas de GUI estan divididas por el guiScale (con escala 3
+     * una pantalla de 1920 son 640 unidades), asi que dibujar ahi metia el video
+     * en 640 px de ancho y luego Minecraft lo estiraba: se veia borroso.
+     * Escalando el PoseStack por 1/guiScale se dibuja pixel a pixel.
+     */
     public void render(GuiGraphics g, int areaWidth, int areaHeight, float alpha) {
         if (this.failed) {
             return;
@@ -157,16 +191,28 @@ public final class VideoPlayer implements AutoCloseable {
             return;
         }
 
+        double guiScale = Minecraft.getInstance().getWindow().getGuiScale();
+        if (guiScale <= 0.0) {
+            guiScale = 1.0;
+        }
+
+        // Area destino en pixeles reales de pantalla.
+        int targetWidth = (int) Math.ceil(areaWidth * guiScale);
+        int targetHeight = (int) Math.ceil(areaHeight * guiScale);
+
         int fw = this.current.width();
         int fh = this.current.height();
-        float scale = Math.max((float) areaWidth / fw, (float) areaHeight / fh);
+        float scale = Math.max((float) targetWidth / fw, (float) targetHeight / fh);
         int dw = Math.max(1, Math.round(fw * scale));
         int dh = Math.max(1, Math.round(fh * scale));
-        int x = (areaWidth - dw) / 2;
-        int y = (areaHeight - dh) / 2;
+        int x = (targetWidth - dw) / 2;
+        int y = (targetHeight - dh) / 2;
 
         g.setColor(1.0F, 1.0F, 1.0F, Math.max(0.0F, Math.min(1.0F, alpha)));
+        g.pose().pushPose();
+        g.pose().scale((float) (1.0 / guiScale), (float) (1.0 / guiScale), 1.0F);
         g.blit(this.textureId, x, y, dw, dh, 0.0F, 0.0F, fw, fh, fw, fh);
+        g.pose().popPose();
         g.setColor(1.0F, 1.0F, 1.0F, 1.0F);
     }
 

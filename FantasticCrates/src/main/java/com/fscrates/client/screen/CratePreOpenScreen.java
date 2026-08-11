@@ -35,9 +35,9 @@ public class CratePreOpenScreen extends Screen {
     /** Control de audio: un cuadradito y nada mas. */
     private static final int AUDIO_SIZE = 14;
     /** Duracion del fundido de entrada, en milisegundos. */
-    private static final float FADE_IN_MS = 260.0F;
-    /** Duracion del fundido a negro antes de la cinematica. */
-    private static final float FADE_OUT_MS = 420.0F;
+    private static final float FADE_IN_MS = 320.0F;
+    /** Duracion del oscurecimiento tipo revelacion antes de la cinematica. */
+    private static final float FADE_OUT_MS = 1150.0F;
 
     private final CrateConfig config;
     private final Runnable openAction;
@@ -70,18 +70,21 @@ public class CratePreOpenScreen extends Screen {
         }
         applyVolume();
 
-        int openWidth = Math.max(110, this.font.width("ABRIR") + 60);
-        int poolWidth = Math.max(130, this.font.width("VER RECOMPENSAS") + 40);
-        int gap = 8;
-        int startX = (this.width - (openWidth + gap + poolWidth)) / 2;
-        int buttonsY = this.height - 44;
+        // Los dos botones con el MISMO ancho y el grupo centrado: queda simetrico.
+        int buttonWidth = Math.max(
+            120,
+            Math.max(this.font.width("ABRIR"), this.font.width("VER RECOMPENSAS")) + 28
+        );
+        int gap = 10;
+        int startX = (this.width - (buttonWidth * 2 + gap)) / 2;
+        int buttonsY = this.height - 42;
 
         this.addRenderableWidget(
             new FSButton(
                 startX,
                 buttonsY,
-                openWidth,
-                22,
+                buttonWidth,
+                20,
                 Component.literal("ABRIR"),
                 FSGui.ACCENT_GREEN,
                 this::proceed
@@ -90,10 +93,10 @@ public class CratePreOpenScreen extends Screen {
 
         this.addRenderableWidget(
             new FSButton(
-                startX + openWidth + gap,
+                startX + buttonWidth + gap,
                 buttonsY,
-                poolWidth,
-                22,
+                buttonWidth,
+                20,
                 Component.literal("VER RECOMPENSAS"),
                 FSGui.ACCENT_BLUE,
                 () -> {
@@ -140,9 +143,7 @@ public class CratePreOpenScreen extends Screen {
         g.fillGradient(0, 0, this.width, 56, 0xB0000000, 0x00000000);
         g.fillGradient(0, this.height - 76, this.width, this.height, 0x00000000, 0xC0000000);
 
-        String name = LootEngine.colorize(this.config.displayName == null ? "" : this.config.displayName);
-        g.drawCenteredString(this.font, name, this.width / 2, 20, 16777215);
-        g.drawCenteredString(this.font, "\u00a77Prep\u00e1rate para abrir tu caja", this.width / 2, 33, 11184810);
+        this.renderTexts(g);
 
         this.renderAudioControl(g, mouseX, mouseY);
 
@@ -164,10 +165,22 @@ public class CratePreOpenScreen extends Screen {
 
         if (this.fadeOutStartedAt != 0L) {
             float progress = Math.min(1.0F, (now - this.fadeOutStartedAt) / FADE_OUT_MS);
-            // Curva suave (ease-in) para que el oscurecimiento no sea lineal y seco.
-            float eased = progress * progress;
+
+            // Revelacion: primero se cierra un vinetado desde los bordes y al
+            // final se va a negro del todo. Asi no aparece la escena de golpe.
+            float vignette = Math.min(1.0F, progress / 0.75F);
+            int bandH = (int) (this.height * 0.55F * vignette);
+            int bandW = (int) (this.width * 0.55F * vignette);
+            g.fillGradient(0, 0, this.width, bandH, 0xFF000000, 0x00000000);
+            g.fillGradient(0, this.height - bandH, this.width, this.height, 0x00000000, 0xFF000000);
+            g.fillGradient(0, 0, bandW, this.height, 0xA0000000, 0x00000000);
+            g.fillGradient(this.width - bandW, 0, this.width, this.height, 0x00000000, 0xA0000000);
+
+            // Oscurecimiento global con curva suave (ease-in cubica).
+            float eased = progress * progress * progress;
             int alpha = (int) (eased * 255.0F) & 0xFF;
             g.fill(0, 0, this.width, this.height, alpha << 24);
+
             if (progress >= 1.0F) {
                 this.handOff();
             }
@@ -178,6 +191,43 @@ public class CratePreOpenScreen extends Screen {
         if (elapsed < FADE_IN_MS) {
             int alpha = (int) ((1.0F - elapsed / FADE_IN_MS) * 255.0F) & 0xFF;
             g.fill(0, 0, this.width, this.height, alpha << 24);
+        }
+    }
+
+    /**
+     * Textos de la escena, todos configurables desde la pestana Mensajes del
+     * editor: cabecera (encima del nombre), nombre de la crate, subtitulo y
+     * lineas libres.
+     */
+    private void renderTexts(GuiGraphics g) {
+        int centerX = this.width / 2;
+        int y = 12;
+
+        String header = LootEngine.colorize(this.config.sceneHeader == null ? "" : this.config.sceneHeader);
+        if (!header.isBlank()) {
+            g.drawCenteredString(this.font, header, centerX, y, 0xFFB0B6C2);
+            y += 12;
+        }
+
+        String name = LootEngine.colorize(this.config.displayName == null ? "" : this.config.displayName);
+        if (!name.isBlank()) {
+            g.drawCenteredString(this.font, name, centerX, y, 0xFFFFFFFF);
+            y += 13;
+        }
+
+        String subtitle = LootEngine.colorize(this.config.sceneSubtitle == null ? "" : this.config.sceneSubtitle);
+        if (!subtitle.isBlank()) {
+            g.drawCenteredString(this.font, subtitle, centerX, y, 0xFFAAAAAA);
+            y += 11;
+        }
+
+        for (String raw : this.config.sceneLines) {
+            if (raw == null || raw.isBlank()) {
+                y += 5;
+                continue;
+            }
+            g.drawCenteredString(this.font, LootEngine.colorize(raw), centerX, y, 0xFFAAAAAA);
+            y += 10;
         }
     }
 

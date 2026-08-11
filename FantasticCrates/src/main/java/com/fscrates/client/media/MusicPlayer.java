@@ -70,12 +70,16 @@ public final class MusicPlayer implements AutoCloseable {
     private void runLoop() {
         String name = this.file.getFileName().toString().toLowerCase(Locale.ROOT);
 
+        // El formato se detecta por el contenido: los links de Drive no traen extension.
+        MediaCache.MediaType type = MediaCache.sniff(this.file);
+
         while (!this.stopped) {
             long startedAt = System.currentTimeMillis();
             try {
-                if (name.endsWith(".mp3") || name.endsWith(".mpeg") || name.endsWith(".mpga")) {
+                if (type == MediaCache.MediaType.MP3
+                    || name.endsWith(".mp3") || name.endsWith(".mpeg") || name.endsWith(".mpga")) {
                     streamMp3();
-                } else if (name.endsWith(".ogg") || name.endsWith(".oga")) {
+                } else if (type == MediaCache.MediaType.OGG || name.endsWith(".ogg") || name.endsWith(".oga")) {
                     streamOgg();
                 } else {
                     streamSampled();

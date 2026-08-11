@@ -11,6 +11,21 @@ import net.minecraft.world.level.saveddata.SavedData;
 
 public class CrateRegistry extends SavedData {
     public static final String NAME = "fscrates_definitions";
+
+    /**
+     * Sube cada vez que se recargan definiciones (por ejemplo con
+     * /fscrate reload). Las cajas ya colocadas guardan su propia copia del
+     * config, asi que lo miran para saber que tienen que refrescarse.
+     */
+    private static volatile int generation;
+
+    public static int generation() {
+        return generation;
+    }
+
+    public static void bumpGeneration() {
+        generation++;
+    }
     private final Map<String, CompoundTag> crates = new HashMap<>();
 
     public static CrateRegistry get(ServerLevel anyLevel) {
