@@ -1,0 +1,35 @@
+modLoader = "javafml"
+loaderVersion = "${loader_version_range}"
+license = "${mod_license}"
+
+[[mods]]
+modId = "${mod_id}"
+version = "${mod_version}"
+displayName = "${mod_name}"
+credits = "Kiro"
+authors = "${mod_authors}"
+description = '''
+Banea y desbanea recetas de crafteo y/o items completos de cualquier item (vanilla y de mods) desde una GUI estilo Fantastic.
+
+Dos modos independientes y reversibles:
+ - Solo receta: el item deja de poder craftearse (mesa, 2x2, horno, etc.) pero se sigue pudiendo usar, tener y obtener por otras vias.
+ - Item completo (blacklist): elimina la receta Y prohibe el item por completo (no se puede tener, usar, recoger ni sacar de creativo).
+
+El baneo de item completo borra el item de cualquier inventario, tambien de los anidados: mochilas de Sophisticated Backpacks (esten en el inventario o equipadas en un slot de Curios), shulkers, bolsas, cofres y maquinas de otros mods, cofre de ender, entidades y marcos. La mochila no se toca, solo lo prohibido que lleve dentro.
+
+Solo admins (permiso nivel 2).
+'''
+
+[[dependencies.${mod_id}]]
+    modId = "forge"
+    mandatory = true
+    versionRange = "${forge_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
+
+[[dependencies.${mod_id}]]
+    modId = "minecraft"
+    mandatory = true
+    versionRange = "${minecraft_version_range}"
+    ordering = "NONE"
+    side = "BOTH"
