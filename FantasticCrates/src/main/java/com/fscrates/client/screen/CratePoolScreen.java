@@ -160,14 +160,42 @@ public class CratePoolScreen extends Screen {
         String title = "\u00a7d\u2726 \u00a7fRecompensas \u00a78(" + this.rows.size() + ")";
         g.drawString(this.font, title, this.leftPos + 9, this.topPos + 9, 16777215, false);
 
-        // Separador bajo el titulo, que se apaga hacia los lados en vez de cortar
-        // de golpe: es lo que hace que la cabecera no parezca pegada a la lista.
-        int lineY = this.topPos + 22;
-        g.fillGradient(this.leftPos + 8, lineY, this.leftPos + this.panelWidth / 2, lineY + 1, 0x00FFFFFF, 0x26FFFFFF);
-        g.fillGradient(this.leftPos + this.panelWidth / 2, lineY, this.leftPos + this.panelWidth - 8, lineY + 1, 0x26FFFFFF, 0x00FFFFFF);
+        // Separador bajo el titulo, que se apaga hacia los lados.
+        //
+        // Antes se dibujaba con fillGradient y salia media linea: ese metodo
+        // interpola de arriba a abajo, asi que en una linea de un pixel de alto se
+        // queda con el color de arriba, que en la mitad izquierda era transparente.
+        // Para que se apague de lado a lado hay que ir por tramos. Y va DOS pixeles
+        // por encima de la lista, que antes caia justo sobre su borde y se veian
+        // dos lineas pisandose.
+        this.fadeLine(g, this.leftPos + 8, this.topPos + 20, this.panelWidth - 16);
 
         this.renderRows(g, mouseX, mouseY);
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * Linea de un pixel que se apaga hacia los dos lados.
+     *
+     * Se pinta por tramos porque el degradado de Minecraft solo va en vertical.
+     * Con 24 tramos el apagado se ve continuo y son 24 rectangulos, nada.
+     */
+    private void fadeLine(GuiGraphics g, int x, int y, int width) {
+        int segments = 24;
+        for (int i = 0; i < segments; i++) {
+            int x1 = x + width * i / segments;
+            int x2 = x + width * (i + 1) / segments;
+            if (x2 <= x1) {
+                continue;
+            }
+            // Maximo en el centro y cero en los extremos.
+            float t = (i + 0.5F) / segments;
+            float strength = 1.0F - Math.abs(t - 0.5F) * 2.0F;
+            int alpha = (int) (46 * strength);
+            if (alpha > 1) {
+                g.fill(x1, y, x2, y + 1, alpha << 24 | 0xFFFFFF);
+            }
+        }
     }
 
     private void renderRows(GuiGraphics g, int mouseX, int mouseY) {
