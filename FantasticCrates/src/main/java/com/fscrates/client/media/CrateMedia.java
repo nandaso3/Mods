@@ -129,6 +129,36 @@ public final class CrateMedia {
         return usingDefaults;
     }
 
+    /**
+     * true cuando la escena ya se puede mostrar entera.
+     *
+     * No es lo mismo que isLoading(): eso solo mira si el archivo esta
+     * descargado. Aqui se espera a que el video este PINTANDO su primer
+     * fotograma, que es lo que hace falta para que los botones y el texto no
+     * salgan flotando sobre un fondo negro.
+     *
+     * Lo que ha fallado cuenta como listo a proposito. Si un enlace esta roto no
+     * hay nada que esperar, y dejar la pantalla sin botones seria dejar al
+     * jugador encerrado.
+     */
+    public static synchronized boolean isSceneReady() {
+        if (!active) {
+            return false;
+        }
+
+        // video == null y sin future pendiente significa que se intento y no
+        // hubo archivo: no va a llegar nunca.
+        boolean videoReady = video != null
+            ? (video.hasPicture() || video.hasFailed())
+            : videoFuture == null;
+
+        // Para la musica basta con que el reproductor exista: se crea cuando el
+        // archivo ya esta entero en disco.
+        boolean musicReady = music != null || musicFuture == null;
+
+        return videoReady && musicReady;
+    }
+
     /** Volumen lineal ya calculado (0 = mute). */
     public static synchronized void applyVolume(float linear) {
         volume = Math.max(0.0F, linear);

@@ -56,6 +56,19 @@ public class CratePreOpenScreen extends Screen {
     private int audioX;
     private int audioY;
 
+    /** Los dos botones de abajo, escondidos hasta que la escena esta lista. */
+    private FSButton openButton;
+    private FSButton poolButton;
+
+    /**
+     * Tope de espera para mostrar la interfaz aunque la media no llegue.
+     *
+     * Los casos de fallo ya cuentan como listo, asi que esto solo salta si una
+     * descarga se queda colgada sin dar error. Sin este tope el jugador se
+     * quedaria mirando una pantalla sin botones.
+     */
+    private static final long UI_SAFETY_MS = 15_000L;
+
     /** Embed de confirmacion "¿consumir 1 llave?" visible. */
     private boolean confirming;
     private int confirmAcceptX;
@@ -102,7 +115,7 @@ public class CratePreOpenScreen extends Screen {
         int startX = (this.width - (buttonWidth * 2 + gap)) / 2;
         int buttonsY = this.height - 42;
 
-        this.addRenderableWidget(
+        this.openButton = this.addRenderableWidget(
             new FSButton(
                 startX,
                 buttonsY,
@@ -114,7 +127,7 @@ public class CratePreOpenScreen extends Screen {
             )
         );
 
-        this.addRenderableWidget(
+        this.poolButton = this.addRenderableWidget(
             new FSButton(
                 startX + buttonWidth + gap,
                 buttonsY,
@@ -129,6 +142,13 @@ public class CratePreOpenScreen extends Screen {
                 }
             )
         );
+
+        // Arrancan escondidos: aparecen cuando la escena esta lista. Si se vuelve
+        // del pool de recompensas la media ya estaba cargada, asi que se calcula
+        // en el momento y no parpadean.
+        boolean ready = this.sceneReady();
+        this.openButton.visible = ready;
+        this.poolButton.visible = ready;
 
         this.audioX = this.width - 8 - AUDIO_SIZE;
         this.audioY = 8;
@@ -185,13 +205,27 @@ public class CratePreOpenScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         CrateMedia.renderBackground(g, this.width, this.height);
 
-        // Degradados arriba y abajo para que el texto se lea sobre cualquier video.
-        g.fillGradient(0, 0, this.width, 56, 0xB0000000, 0x00000000);
-        g.fillGradient(0, this.height - 76, this.width, this.height, 0x00000000, 0xC0000000);
+        // Nada de interfaz hasta que el video este pintando y la musica cargada:
+        // asi no se ven los botones y el texto flotando sobre el fondo negro
+        // mientras se descarga.
+        boolean ready = this.sceneReady();
+        if (this.openButton != null) {
+            this.openButton.visible = ready;
+        }
+        if (this.poolButton != null) {
+            this.poolButton.visible = ready;
+        }
 
-        this.renderTexts(g);
+        if (ready) {
+            // Los degradados existen para que el texto se lea sobre cualquier
+            // video, asi que sin texto tampoco pintan nada: solo serian dos
+            // bandas oscuras encima de la imagen.
+            g.fillGradient(0, 0, this.width, 56, 0xB0000000, 0x00000000);
+            g.fillGradient(0, this.height - 76, this.width, this.height, 0x00000000, 0xC0000000);
 
-        this.renderAudioControl(g, mouseX, mouseY);
+            this.renderTexts(g);
+            this.renderAudioControl(g, mouseX, mouseY);
+        }
 
         if (CrateMedia.isLoading()) {
             this.renderLoadingOverlay(g);
@@ -403,7 +437,24 @@ public class CratePreOpenScreen extends Screen {
 
     // ------------------------------------------------------------------- input
 
+    /**
+     * true cuando ya se puede mostrar la interfaz.
+     *
+     * Es la media lista, o que se ha agotado la espera de seguridad.
+     */
+    private boolean sceneReady() {
+        if (CrateMedia.isSceneReady()) {
+            return true;
+        }
+        return this.openedAt != 0L && System.currentTimeMillis() - this.openedAt >= UI_SAFETY_MS;
+    }
+
     private boolean isOverAudio(double mouseX, double mouseY) {
+        // Escondido no se puede pulsar: si no, el control de volumen seguiria
+        // respondiendo en una zona donde no se ve nada.
+        if (!this.sceneReady()) {
+            return false;
+        }
         return mouseX >= this.audioX
             && mouseX < this.audioX + AUDIO_SIZE
             && mouseY >= this.audioY
