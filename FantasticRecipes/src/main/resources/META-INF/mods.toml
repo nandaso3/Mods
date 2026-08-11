@@ -15,7 +15,7 @@ Dos modos independientes y reversibles:
  - Solo receta: el item deja de poder craftearse (mesa, 2x2, horno, etc.) pero se sigue pudiendo usar, tener y obtener por otras vias.
  - Item completo (blacklist): elimina la receta Y prohibe el item por completo (no se puede tener, usar, recoger ni sacar de creativo).
 
-El baneo de item completo borra el item de cualquier inventario, tambien de los anidados: mochilas de Sophisticated Backpacks, shulkers, bolsas, cofres y maquinas de otros mods, cofre de ender, entidades y marcos.
+El baneo de item completo borra el item de cualquier inventario, tambien de los anidados: mochilas de Sophisticated Backpacks (esten en el inventario o equipadas en un slot de Curios), shulkers, bolsas, cofres y maquinas de otros mods, cofre de ender, entidades y marcos. La mochila no se toca, solo lo prohibido que lleve dentro.
 
 Solo admins (permiso nivel 2).
 '''

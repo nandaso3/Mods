@@ -1,5 +1,6 @@
 package com.fsrecipes;
 
+import com.fsrecipes.compat.CuriosCompat;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -109,6 +110,12 @@ public final class ItemBanEnforcer {
       // Cofre de ender: no forma parte del inventario normal.
       removed += DeepSweeper.sweepContainer(sp.getEnderChestInventory());
 
+      // Slots de Curios: tampoco forman parte del inventario. Aqui es donde suele
+      // acabar la mochila equipada, y hay que entrar en ella.
+      if (deep) {
+         removed += CuriosCompat.sweep(sp);
+      }
+
       // Rejilla de crafteo 2x2 del inventario propio.
       if (sp.inventoryMenu != null) {
          CraftingContainer craft = sp.inventoryMenu.getCraftSlots();
@@ -158,8 +165,12 @@ public final class ItemBanEnforcer {
 
    // ------------------------------------------------------------------ mundo
 
-   /** Un item prohibido nunca llega a existir como entidad en el suelo. */
-   @SubscribeEvent
+   /**
+    * Un item prohibido nunca llega a existir como entidad en el suelo. Prioridad alta
+    * para adelantarnos a los mods que recogen items del suelo automaticamente (como el
+    * Pickup Upgrade de Sophisticated Backpacks).
+    */
+   @SubscribeEvent(priority = EventPriority.HIGHEST)
    public static void onEntityJoinLevel(EntityJoinLevelEvent event) {
       if (!RecipeBans.hasItemBans() || event.getLevel().isClientSide()) {
          return;
@@ -188,7 +199,7 @@ public final class ItemBanEnforcer {
    }
 
    /** Por si alguna entidad prohibida ya estaba en el mundo antes del baneo. */
-   @SubscribeEvent
+   @SubscribeEvent(priority = EventPriority.HIGHEST)
    public static void onPickup(EntityItemPickupEvent event) {
       if (RecipeBans.hasItemBans()) {
          ItemEntity ie = event.getItem();
