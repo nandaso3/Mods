@@ -145,6 +145,53 @@ public final class VideoPlayer implements AutoCloseable {
         }
     }
 
+    /**
+     * Explica en el log QUE tiene de malo el video, no un "no se pudo" a secas.
+     *
+     * Los dos fallos tipicos son exportar en 10 bits o en HEVC (H.265), que es lo
+     * que hacen por defecto muchos editores y moviles. En los dos casos el archivo
+     * parece un MP4 normal, asi que sin un mensaje concreto es imposible adivinarlo.
+     */
+    private void reportFailure(Throwable t) {
+        String name = this.file == null ? "?" : this.file.getFileName().toString();
+        String message = t.getMessage() == null ? "" : t.getMessage();
+
+        if (message.contains("High bit depth")) {
+            FSCrates.LOGGER.error(
+                "[FSCrates] '{}' esta en 10 bits y no se puede reproducir. Expórtalo en 8 bits "
+                    + "(en ffmpeg: -pix_fmt yuv420p). Mira config/fscrates/_LEEME_VIDEOS.txt.",
+                name
+            );
+            return;
+        }
+
+        if (message.contains("Not a video track") || message.contains("hvc1") || message.contains("hev1")) {
+            FSCrates.LOGGER.error(
+                "[FSCrates] '{}' parece HEVC (H.265) y solo se soporta H.264. Reconviertelo "
+                    + "(en ffmpeg: -c:v libx264). Mira config/fscrates/_LEEME_VIDEOS.txt.",
+                name
+            );
+            return;
+        }
+
+        if (message.contains("Unsupported h264 feature")) {
+            FSCrates.LOGGER.error(
+                "[FSCrates] '{}' usa una opcion de H.264 que no se soporta ({}). Reconviertelo con "
+                    + "los ajustes de config/fscrates/_LEEME_VIDEOS.txt.",
+                name,
+                message
+            );
+            return;
+        }
+
+        FSCrates.LOGGER.error(
+            "[FSCrates] No se pudo reproducir '{}': {}. Tiene que ser MP4 con video H.264 de 8 bits. "
+                + "Mira config/fscrates/_LEEME_VIDEOS.txt.",
+            name,
+            t.toString()
+        );
+    }
+
     /** Ultimo recurso si el contenido no se reconoce: mirar la extension. */
     private static MediaCache.MediaType typeFromName(Path file) {
         String name = file == null ? "" : file.getFileName().toString().toLowerCase(Locale.ROOT);
@@ -476,11 +523,7 @@ public final class VideoPlayer implements AutoCloseable {
                 }
             }
         } catch (Throwable t) {
-            FSCrates.LOGGER.error(
-                "[FSCrates] No se pudo reproducir el video '{}': {}. Asegurate de que sea MP4 con video H.264.",
-                this.file == null ? "?" : this.file.getFileName(),
-                t.toString()
-            );
+            this.reportFailure(t);
             this.failed = true;
         } finally {
             window.forEach(this::release);

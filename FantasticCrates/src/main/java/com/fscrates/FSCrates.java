@@ -3,6 +3,7 @@ package com.fscrates;
 import com.fscrates.client.ClientSetup;
 import com.fscrates.command.FSCrateCommand;
 import com.fscrates.config.ItemReferenceGenerator;
+import com.fscrates.config.MediaGuide;
 import com.fscrates.config.JsonCrateLoader;
 import com.fscrates.network.FSNetwork;
 import com.fscrates.registry.ModRegistry;
@@ -42,6 +43,10 @@ public class FSCrates {
         } catch (Throwable t) {
             LOGGER.error("[FSCrates] Fallo generando la referencia de items", t);
         }
+
+        // Chuleta de formatos de video, para el admin que configura las cajas
+        // desde el servidor.
+        MediaGuide.write();
 
         try {
             JsonCrateLoader.loadAll(event.getServer());
