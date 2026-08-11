@@ -282,7 +282,8 @@ public final class RecipeBans {
       if (server != null) {
          applyToManager(server.getRecipeManager(), server.registryAccess(), false);
          resyncClients(server);
-         ItemBanEnforcer.sweepAll(server);
+         // Purga puntual: inventarios, contenedores cargados y entidades.
+         ItemBanEnforcer.purgeEverything(server);
       }
    }
 

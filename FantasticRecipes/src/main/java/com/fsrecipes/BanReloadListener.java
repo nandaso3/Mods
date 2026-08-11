@@ -36,9 +36,9 @@ public final class BanReloadListener implements PreparableReloadListener {
 
          MinecraftServer server = ServerLifecycleHooks.getCurrentServer();
          if (server != null) {
-            // Si el JSON se edito a mano, los clientes y los inventarios se ponen al dia.
+            // Si el JSON se edito a mano, clientes e inventarios se ponen al dia.
             RecipeBans.resyncClients(server);
-            ItemBanEnforcer.sweepAll(server);
+            ItemBanEnforcer.purgeEverything(server);
          }
       }, gameExecutor);
    }
