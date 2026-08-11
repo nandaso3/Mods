@@ -4,6 +4,7 @@ import com.fscrates.config.CrateConfig;
 import com.fscrates.crate.CrateOpeningService;
 import com.fscrates.item.CrateItems;
 import com.fscrates.network.FSNetwork;
+import com.fscrates.crate.OpenAuthorization;
 import com.fscrates.network.OpenEditorPacket;
 import com.fscrates.network.OpenPreviewPacket;
 import com.fscrates.registry.ModRegistry;
@@ -116,6 +117,11 @@ public class CrateBlock extends BaseEntityBlock {
                 // La pantalla de pre-apertura se abre SIN pedir llave: se puede
                 // mirar la escena y el pool de recompensas siempre. La llave se
                 // comprueba al pulsar ABRIR (ver RequestOpenPacket).
+                //
+                // Aqui ya han pasado todos los filtros del click (Forge y, en
+                // servidores hibridos, Bukkit con sus plugins de proteccion), asi
+                // que este es el unico sitio donde se concede permiso para abrir.
+                OpenAuthorization.grant(serverPlayer, pos);
                 FSNetwork.sendToClient(serverPlayer, new OpenPreviewPacket(crate.save(), pos));
                 return InteractionResult.CONSUME;
             }

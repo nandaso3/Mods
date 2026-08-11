@@ -3,6 +3,7 @@ package com.fscrates.network;
 import com.fscrates.block.CrateBlockEntity;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.crate.CrateOpeningService;
+import com.fscrates.crate.OpenAuthorization;
 import com.fscrates.item.CrateItems;
 import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
@@ -50,6 +51,14 @@ public class RequestOpenPacket {
             }
 
             if (!(player.level().getBlockEntity(msg.pos) instanceof CrateBlockEntity be)) {
+                return;
+            }
+
+            // Solo se abre si el jugador llego aqui haciendo click en la caja de
+            // verdad. Asi, si un plugin de proteccion cancela el click, no hay
+            // permiso y este paquete no sirve de nada: no se puede saltar la
+            // proteccion mandando el paquete a mano.
+            if (!OpenAuthorization.consume(player, msg.pos)) {
                 return;
             }
 
