@@ -30,6 +30,8 @@ public class ScrollSelector<T> extends AbstractWidget {
     private String query = "";
     /** Arrastre del scrollbar con click derecho. */
     private final ScrollbarDrag scrollbarDrag = new ScrollbarDrag();
+    /** Posicion recordada por la pantalla, para sobrevivir a rebuildWidgets(). */
+    private ScrollMemory memory;
 
     public ScrollSelector(
         int x, int y, int width, int height, int rowHeight, Function<T, String> displayName, Function<T, String> filterText, Function<T, ItemStack> icon
@@ -46,18 +48,33 @@ public class ScrollSelector<T> extends AbstractWidget {
         return this;
     }
 
+    /**
+     * Ata la lista a una posicion recordada por la pantalla.
+     *
+     * Sin esto la lista vuelve arriba cada vez que la pantalla se reconstruye,
+     * que es en cuanto eliges cualquier cosa.
+     */
+    public ScrollSelector<T> remember(ScrollMemory memory) {
+        this.memory = memory;
+        return this;
+    }
+
     public void setItems(List<T> items) {
         this.all.clear();
         this.all.addAll(items);
-        this.applyFilter();
+        // Cambiar los items no es motivo para volver arriba: normalmente es la
+        // misma lista que se vuelve a poblar tras reconstruir la pantalla.
+        this.applyFilter(true);
     }
 
     public void setQuery(String q) {
         this.query = q == null ? "" : q.toLowerCase(Locale.ROOT).trim();
-        this.applyFilter();
+        // Buscar SI vuelve arriba: los resultados son otros y la posicion
+        // anterior no significa nada.
+        this.applyFilter(false);
     }
 
-    private void applyFilter() {
+    private void applyFilter(boolean keepPosition) {
         this.filtered.clear();
         if (this.query.isEmpty()) {
             this.filtered.addAll(this.all);
@@ -69,8 +86,38 @@ public class ScrollSelector<T> extends AbstractWidget {
             }
         }
 
-        this.scroll = 0;
+        if (!keepPosition) {
+            this.selectedIndex = -1;
+            if (this.memory != null) {
+                this.memory.selected = null;
+            }
+            this.setScroll(0);
+            return;
+        }
+
+        // Se recupera la fila elegida por identidad, no por indice: entre
+        // reconstrucciones la lista puede haberse reordenado.
         this.selectedIndex = -1;
+        Object wanted = this.memory == null ? null : this.memory.selected;
+        if (wanted != null) {
+            for (int i = 0; i < this.filtered.size(); i++) {
+                if (this.filtered.get(i) == wanted) {
+                    this.selectedIndex = i;
+                    break;
+                }
+            }
+        }
+        // Si la lista ha encogido (borraste algo) el clamp de setScroll evita
+        // quedarse en un hueco vacio por debajo del final.
+        this.setScroll(this.memory == null ? this.scroll : this.memory.scroll);
+    }
+
+    /** Unico sitio donde se mueve el scroll: acota y deja constancia en la memoria. */
+    private void setScroll(int value) {
+        this.scroll = Math.max(0, Math.min(this.maxScroll(), value));
+        if (this.memory != null) {
+            this.memory.scroll = this.scroll;
+        }
     }
 
     public T getSelected() {
@@ -148,9 +195,9 @@ public class ScrollSelector<T> extends AbstractWidget {
         if (ScrollbarDrag.isDragButton(button)
             && this.maxScroll() > 0
             && ScrollbarDrag.overTrack(mouseX, mouseY, this.barX(), BAR_WIDTH, this.getY(), this.height)) {
-            this.scroll = this.scrollbarDrag.beginOnTrack(
+            this.setScroll(this.scrollbarDrag.beginOnTrack(
                 mouseY, this.scroll, this.getY(), this.height, this.thumbHeight(), this.maxScroll()
-            );
+            ));
             return true;
         }
 
@@ -159,6 +206,11 @@ public class ScrollSelector<T> extends AbstractWidget {
             int index = this.scroll + row;
             if (index >= 0 && index < this.filtered.size() && mouseX < (double)(this.getX() + this.width - 6)) {
                 this.selectedIndex = index;
+                // Se apunta la eleccion ANTES de avisar, porque quien escucha
+                // suele reconstruir la pantalla y leer esta memoria al vuelo.
+                if (this.memory != null) {
+                    this.memory.selected = this.filtered.get(index);
+                }
                 this.onSelect.accept(this.filtered.get(index));
                 return true;
             } else {
@@ -171,7 +223,7 @@ public class ScrollSelector<T> extends AbstractWidget {
 
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
         if (this.scrollbarDrag.isDragging()) {
-            this.scroll = this.scrollbarDrag.drag(mouseY, this.height, this.thumbHeight(), this.maxScroll());
+            this.setScroll(this.scrollbarDrag.drag(mouseY, this.height, this.thumbHeight(), this.maxScroll()));
             return true;
         }
         return super.mouseDragged(mouseX, mouseY, button, dragX, dragY);
@@ -189,7 +241,7 @@ public class ScrollSelector<T> extends AbstractWidget {
         if (!this.isMouseOver(mouseX, mouseY)) {
             return false;
         } else {
-            this.scroll = Math.max(0, Math.min(this.maxScroll(), this.scroll - (int)Math.signum(delta)));
+            this.setScroll(this.scroll - (int)Math.signum(delta));
             return true;
         }
     }

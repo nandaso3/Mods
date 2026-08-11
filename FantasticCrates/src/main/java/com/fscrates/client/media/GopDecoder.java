@@ -42,6 +42,8 @@ final class GopDecoder implements AutoCloseable {
         int width;
         int height;
         int chromaWidth;
+        /** Filas del plano de color. Hace falta para interpolarlo sin salirse. */
+        int chromaHeight;
         double timestamp;
         double duration;
         int index;
@@ -329,6 +331,7 @@ final class GopDecoder implements AutoCloseable {
             frame.width = w;
             frame.height = h;
             frame.chromaWidth = cw;
+            frame.chromaHeight = ch;
         }
         frame.timestamp = meta.getTimestamp();
         frame.duration = meta.getDuration();

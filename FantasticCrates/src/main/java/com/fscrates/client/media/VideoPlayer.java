@@ -13,6 +13,7 @@ import java.util.PriorityQueue;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ForkJoinPool;
+import java.util.function.IntConsumer;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -93,6 +94,24 @@ public final class VideoPlayer implements AutoCloseable {
     private int[] scratch;
     /** Decodificador multihilo, si el archivo lo permite. */
     private volatile GopDecoder gopDecoder;
+
+    /**
+     * Conversion de color de este archivo, sacada de sus metadatos.
+     *
+     * Se resuelve con el primer fotograma y no antes porque hasta entonces no se
+     * sabe la resolucion real (la del crop, no la del relleno de macrobloque),
+     * que es lo que se usa si el archivo no declara nada.
+     */
+    private YuvToRgb converter;
+
+    /**
+     * Cuanto se esta ampliando el video en pantalla. Lo escribe el hilo de render
+     * y lo lee el de decodificado para decidir si hace falta enfocar.
+     */
+    private volatile float drawScale = 1.0F;
+
+    /** Brillo ya enfocado. Aparte del original porque el enfoque lee los vecinos. */
+    private byte[] sharpened;
 
     private VideoTexture texture;
     private ResourceLocation textureId;
@@ -282,6 +301,11 @@ public final class VideoPlayer implements AutoCloseable {
         // salga exactamente igual de nitido que el archivo original.
         this.texture.setSharpFiltering(Math.abs(scale - 1.0F) < 0.01F);
 
+        // El decodificador necesita saber cuanto se va a ampliar para decidir si
+        // enfoca. Se apunta aqui, que es el unico sitio donde se conoce el hueco
+        // real en pixeles de pantalla.
+        this.drawScale = scale;
+
         g.setColor(1.0F, 1.0F, 1.0F, Math.max(0.0F, Math.min(1.0F, alpha)));
         g.pose().pushPose();
         g.pose().scale((float) (1.0 / guiScale), (float) (1.0 / guiScale), 1.0F);
@@ -427,7 +451,8 @@ public final class VideoPlayer implements AutoCloseable {
                 }
 
                 RgbaFrame out = this.convertShared(
-                    frame.luma, frame.cb, frame.cr, frame.width, frame.height, frame.chromaWidth,
+                    frame.luma, frame.cb, frame.cr, frame.width, frame.height,
+                    frame.chromaWidth, frame.chromaHeight,
                     frame.timestamp, frame.duration
                 );
                 decoder.recycle(frame);
@@ -592,7 +617,8 @@ public final class VideoPlayer implements AutoCloseable {
 
     private RgbaFrame convert(YuvFrame frame) {
         return this.convertShared(
-            frame.luma, frame.cb, frame.cr, frame.width, frame.height, frame.chromaWidth,
+            frame.luma, frame.cb, frame.cr, frame.width, frame.height,
+            frame.chromaWidth, frame.chromaHeight,
             frame.timestamp, frame.duration
         );
     }
@@ -605,6 +631,7 @@ public final class VideoPlayer implements AutoCloseable {
         int w,
         int h,
         int cw,
+        int ch,
         double timestamp,
         double duration
     ) {
@@ -626,15 +653,55 @@ public final class VideoPlayer implements AutoCloseable {
         }
         int[] scratch = this.scratch;
 
-        Runnable job = () -> IntStream.range(0, h).parallel().forEach(y -> convertRow(y, luma, cb, cr, w, cw, scratch));
+        YuvToRgb rgb = this.converter;
+        if (rgb == null) {
+            rgb = this.file == null ? YuvToRgb.byResolution(w, h) : YuvToRgb.forFile(this.file, w, h);
+            this.converter = rgb;
+            FSCrates.LOGGER.info(
+                "[FSCrates] '{}' {}x{}: color {}.",
+                this.file == null ? "?" : this.file.getFileName(),
+                w,
+                h,
+                rgb.describe()
+            );
+        }
+        YuvToRgb use = rgb;
+
+        // Si el video se va a ver ampliado se enfoca el brillo antes de convertir.
+        // A escala 1:1 esto no entra y el fotograma va tal cual viene del archivo.
+        float amount = LumaSharpen.amountFor(this.drawScale);
+        int amount8 = Math.round(amount * 256.0F);
+        byte[] target;
+        if (amount > 0.0F) {
+            if (this.sharpened == null || this.sharpened.length != w * h) {
+                this.sharpened = new byte[w * h];
+            }
+            target = this.sharpened;
+        } else {
+            target = null;
+        }
+
+        // Enfoque y conversion van juntos en la misma pasada por fila. Se puede
+        // porque el enfoque de una fila solo lee el brillo ORIGINAL (que nadie
+        // modifica) y la conversion de esa fila solo necesita esa misma fila ya
+        // enfocada. Asi el reparto entre hilos vale para los dos pasos y se
+        // recorre la memoria una vez en lugar de dos.
+        IntConsumer rowJob = y -> {
+            byte[] src = luma;
+            if (target != null) {
+                LumaSharpen.row(luma, target, w, h, y, amount8);
+                src = target;
+            }
+            use.row(y, src, cb, cr, w, h, cw, ch, scratch);
+        };
 
         // La conversion solo se reparte entre hilos con fotogramas grandes. Con
         // 720p un hilo tarda pocos milisegundos y no compensa despertar a mas.
         ForkJoinPool pool = w * h >= PARALLEL_CONVERT_PIXELS ? convertPool() : null;
         if (pool == null) {
-            IntStream.range(0, h).forEach(y -> convertRow(y, luma, cb, cr, w, cw, scratch));
+            IntStream.range(0, h).forEach(rowJob);
         } else {
-            pool.submit(job).join();
+            pool.submit(() -> IntStream.range(0, h).parallel().forEach(rowJob)).join();
         }
 
         buffer.clear();
@@ -679,30 +746,6 @@ public final class VideoPlayer implements AutoCloseable {
         if (frame != null && this.yuvPool.size() <= REORDER_WINDOW + 2) {
             this.yuvPool.offer(frame);
         }
-    }
-
-    /** Convierte una fila YUV 4:2:0 a RGBA empaquetado en int. */
-    private static void convertRow(int y, byte[] luma, byte[] cb, byte[] cr, int w, int cw, int[] out) {
-        int lumaRow = y * w;
-        int chromaRow = (y >> 1) * cw;
-        for (int x = 0; x < w; x++) {
-            int chromaCol = x >> 1;
-            int yy = luma[lumaRow + x] + 128;
-            int u = cb[chromaRow + chromaCol];
-            int v = cr[chromaRow + chromaCol];
-
-            int r = yy + ((91881 * v) >> 16);
-            int g = yy - ((22554 * u + 46802 * v) >> 16);
-            int b = yy + ((116130 * u) >> 16);
-
-            // El buffer va en orden nativo (little endian), asi que este int
-            // aterriza en memoria como R, G, B, A: justo lo que espera GL_RGBA.
-            out[lumaRow + x] = 0xFF000000 | (clamp(b) << 16) | (clamp(g) << 8) | clamp(r);
-        }
-    }
-
-    private static int clamp(int v) {
-        return v < 0 ? 0 : (v > 255 ? 255 : v);
     }
 
     /**

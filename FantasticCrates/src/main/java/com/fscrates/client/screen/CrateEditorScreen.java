@@ -11,6 +11,7 @@ import com.fscrates.client.color.FSTextStyle;
 import com.fscrates.client.color.FSTextStyleScreen;
 import com.fscrates.client.media.MediaCache;
 import com.fscrates.client.render.CrateStyles;
+import com.fscrates.client.widget.ScrollMemory;
 import com.fscrates.client.widget.ScrollSelector;
 import com.fscrates.client.widget.ScrollbarDrag;
 import com.fscrates.config.CrateConfig;
@@ -23,7 +24,9 @@ import com.fscrates.network.FSNetwork;
 import com.fscrates.network.SaveCratePacket;
 import com.fscrates.registry.ModRegistry;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Consumer;
 import java.util.Locale;
 import java.util.function.DoubleConsumer;
@@ -65,6 +68,20 @@ public class CrateEditorScreen extends Screen {
     private static final int PROB_BAR_WIDTH = 5;
     /** Arrastre de la barra de la pestana de probabilidades. */
     private final ScrollbarDrag probDrag = new ScrollbarDrag();
+
+    /**
+     * Posicion de cada lista, guardada aqui y no en los widgets.
+     *
+     * Los widgets se tiran y se recrean en cada rebuildWidgets(), o sea cada vez
+     * que eliges algo, asi que si la posicion viviera en ellos la lista volveria
+     * arriba y perderias de vista el item que acabas de tocar.
+     */
+    private final Map<String, ScrollMemory> scrollMemories = new HashMap<>();
+
+    /** Memoria de una lista, creada la primera vez que se pide. */
+    private ScrollMemory mem(String id) {
+        return this.scrollMemories.computeIfAbsent(id, key -> new ScrollMemory());
+    }
     private int lastMouseX;
     private int lastMouseY;
     /** URL seleccionada en las pestanas de Videos / Musica. */
@@ -204,6 +221,7 @@ public class CrateEditorScreen extends Screen {
             ScrollSelector<FSTextStyle> lines = new ScrollSelector<>(
                 x, y, w, listH, 14, l -> l.text, l -> l.text, null
             );
+            lines.remember(this.mem("lineasEscena"));
             lines.setItems(new ArrayList<>(this.config.sceneLines));
             lines.onSelect(line -> this.selectedSceneLine = line);
             this.addRenderableWidget(lines);
@@ -575,6 +593,7 @@ public class CrateEditorScreen extends Screen {
                 rl -> RegistryLists.effectName(rl) + " " + rl,
                 rl -> ItemStack.EMPTY
             );
+            effects.remember(this.mem("efectos"));
             effects.setItems(RegistryLists.effects());
             effects.onSelect(rl -> {
                 er.effectId = rl.toString();
@@ -629,6 +648,7 @@ public class CrateEditorScreen extends Screen {
                     st -> st.getHoverName().getString() + " " + RegistryLists.itemId(st.getItem()),
                     st -> st
                 );
+                inventory.remember(this.mem("inventario"));
                 inventory.setItems(this.playerInventory());
                 inventory.onSelect(st -> {
                     RewardEntry r2 = new RewardEntry(RewardEntry.Type.ITEM);
@@ -655,6 +675,7 @@ public class CrateEditorScreen extends Screen {
                     it -> RegistryLists.itemName(it) + " " + RegistryLists.itemId(it),
                     it -> new ItemStack(it)
                 );
+                items.remember(this.mem("itemsRegistro"));
                 items.setItems(RegistryLists.items());
                 items.onSelect(it -> {
                     RewardEntry r2 = new RewardEntry(RewardEntry.Type.ITEM);
@@ -689,6 +710,7 @@ public class CrateEditorScreen extends Screen {
             RewardEntry::describe,
             rx -> rx.type == RewardEntry.Type.ITEM ? rx.item : ItemStack.EMPTY
         );
+        current.remember(this.mem("premios"));
         current.setItems(new ArrayList<>(this.config.rewards));
         current.onSelect(rx -> {
             this.selectedReward = rx;
@@ -909,6 +931,7 @@ public class CrateEditorScreen extends Screen {
             a -> a.displayName() + " " + a.id(),
             null
         );
+        list.remember(this.mem("animaciones"));
         list.setItems(AnimationRegistry.all());
         list.onSelect(a -> {
             this.config.animationId = a.id();
@@ -935,6 +958,7 @@ public class CrateEditorScreen extends Screen {
             id -> CrateStyles.displayName(id) + " " + id,
             null
         );
+        list.remember(this.mem("sonidos"));
         list.setItems(ids);
         list.onSelect(id -> {
             this.config.styleId = id;
@@ -1061,6 +1085,7 @@ public class CrateEditorScreen extends Screen {
             ParticleLayer::shortLabel,
             pl -> ItemStack.EMPTY
         );
+        layers.remember(this.mem("capasParticulas"));
         layers.setItems(new ArrayList<>(this.config.particleLayers));
         layers.onSelect(pl -> {
             this.selectedLayer = pl;
@@ -1087,6 +1112,7 @@ public class CrateEditorScreen extends Screen {
             rl -> ParticleNames.spanish(rl.getPath()) + " " + rl,
             rl -> ItemStack.EMPTY
         );
+        types.remember(this.mem("tiposParticulas"));
         types.setItems(RegistryLists.particles());
         types.onSelect(rl -> {
             if (this.selectedLayer != null) {
@@ -1337,6 +1363,7 @@ public class CrateEditorScreen extends Screen {
                 e -> e.defaultName + " " + e.group + " " + e.id,
                 e -> this.previewKey(e)
             );
+            list.remember(this.mem("modelosLlave"));
             list.setItems(KeyModels.ALL);
             list.onSelect(e -> {
                 this.config.uniqueKeyModel = e.id;
@@ -1595,6 +1622,7 @@ public class CrateEditorScreen extends Screen {
         ScrollSelector<String> list = new ScrollSelector<>(
             x, y + 12, w, listH, 14, url -> url, url -> url, null
         );
+        list.remember(this.mem("urlsMedia"));
         list.setItems(new ArrayList<>(urls));
         list.onSelect(url -> this.selectedMediaUrl = url);
         this.addRenderableWidget(list);

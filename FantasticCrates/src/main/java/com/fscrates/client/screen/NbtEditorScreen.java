@@ -1,6 +1,7 @@
 package com.fscrates.client.screen;
 
 import com.fscrates.client.color.FSTextStyleScreen;
+import com.fscrates.client.widget.ScrollMemory;
 import com.fscrates.client.widget.ScrollSelector;
 import com.fscrates.config.EsNames;
 import java.util.ArrayList;
@@ -37,6 +38,17 @@ public class NbtEditorScreen extends Screen {
     private final Screen parent;
     private final ItemStack stack;
     private NbtEditorScreen.Tab activeTab = NbtEditorScreen.Tab.GENERAL;
+    /**
+     * Posicion de las listas de encantamientos y atributos. Vive en la pantalla
+     * porque al elegir uno se reconstruyen los widgets, y con la posicion dentro
+     * del widget la lista volvia arriba en cada añadido.
+     */
+    private final java.util.Map<String, ScrollMemory> scrollMemories = new java.util.HashMap<>();
+
+    private ScrollMemory mem(String id) {
+        return this.scrollMemories.computeIfAbsent(id, key -> new ScrollMemory());
+    }
+
     private int leftPos;
     private int topPos;
     private int panelWidth;
@@ -580,6 +592,7 @@ public class NbtEditorScreen extends Screen {
         ScrollSelector<ResourceLocation> picker = new ScrollSelector<>(
             x, y + 20, colW, this.bh() - 22, 14, rl -> EsNames.enchant(rl), ResourceLocation::toString, rl -> ItemStack.EMPTY
         );
+        picker.remember(this.mem("encantamientos"));
         picker.setItems(ids);
         picker.onSelect(rl -> {
             NbtEditorScreen.EnchEntry e3 = new NbtEditorScreen.EnchEntry();
@@ -704,6 +717,7 @@ public class NbtEditorScreen extends Screen {
         ScrollSelector<ResourceLocation> picker = new ScrollSelector<>(
             x, y + 20, colW, this.bh() - 22, 14, rl -> EsNames.attribute(rl), ResourceLocation::toString, rl -> ItemStack.EMPTY
         );
+        picker.remember(this.mem("atributos"));
         picker.setItems(ids);
         picker.onSelect(rl -> {
             NbtEditorScreen.AttrEntry e2 = new NbtEditorScreen.AttrEntry();
