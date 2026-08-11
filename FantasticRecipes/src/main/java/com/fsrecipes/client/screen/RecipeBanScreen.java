@@ -26,23 +26,50 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraftforge.registries.ForgeRegistries;
 
+/**
+ * GUI de administracion.
+ *
+ * <p>Funciona en dos pasos, a proposito: primero seleccionas (un item de cualquiera de
+ * las dos listas, o una categoria entera) y luego pulsas el boton de la accion que
+ * quieras. Asi un clic en la lista no cambia nada por si solo.
+ */
 public final class RecipeBanScreen extends Screen {
-   private static final String MODE_TOOLTIP = "Modo que se aplica al hacer clic en un item.\n\n"
-      + "§eSolo receta§r: el item deja de poder craftearse, pero se puede seguir teniendo y usando.\n\n"
-      + "§cItem completo§r: quita la receta Y prohibe el item (no se puede tener, usar, recoger ni sacar de creativo).\n\n"
-      + "Clic en un item que ya tiene el modo activo = desbanearlo. Todo es reversible.";
+   private static final String TIP_RECIPE = "Quita la RECETA del item seleccionado.\n\n"
+      + "§7Deja de poder craftearse, cocinarse o forjarse, pero se puede seguir teniendo, "
+      + "usando y consiguiendo por loot, comandos o creativo.";
+   private static final String TIP_ITEM = "Prohibe el ITEM seleccionado por completo.\n\n"
+      + "§7Incluye quitar la receta, y ademas: no se puede tener en el inventario, usar, "
+      + "recoger del suelo, tirar ni sacar del creativo. Se borra de todos los inventarios "
+      + "donde aparezca, tambien dentro de mochilas, shulkers y cofres.";
+   private static final String TIP_UNBAN = "Quita cualquier baneo de lo seleccionado y lo deja como estaba.";
 
    /** Filtros de la columna de baneados. */
    private static final int VIEW_ALL = 0;
    private static final int VIEW_RECIPE = 1;
    private static final int VIEW_ITEM = 2;
 
+   // --- estado que sobrevive a rebuildWidgets() ---
    private boolean fromInventory = false;
-   /** Modo que se aplica al hacer clic. Se conserva entre reconstrucciones de la pantalla. */
-   private BanMode activeMode = BanMode.RECIPE;
    private int bannedView = VIEW_ALL;
+   private String catalogQuery = "";
+   private String bannedQuery = "";
+   private int catalogScroll = 0;
+   private int bannedScroll = 0;
+
+   /** Item seleccionado, o null. Excluyente con {@link #selectedCategory}. */
+   private ResourceLocation selectedItem = null;
+   private ResourceKey<CreativeModeTab> selectedCategory = null;
+   private String selectedCategoryName = "";
+   private int selectedCategorySize = 0;
 
    private final List<RecipeBanScreen.Label> labels = new ArrayList<>();
+   private ScrollSelector<Item> catalogList;
+   private ScrollSelector<ItemStack> inventoryList;
+   private ScrollSelector<Item> bannedList;
+   private Button banRecipeButton;
+   private Button banItemButton;
+   private Button unbanButton;
+
    private int catalogCount = 0;
    private int gameItemTotal = 0;
    private int leftPos;
@@ -58,7 +85,50 @@ public final class RecipeBanScreen extends Screen {
       this.rebuildWidgets();
    }
 
-   // ------------------------------------------------------------------ estado
+   /** Guarda scroll y seleccion antes de que se destruyan los widgets. */
+   protected void rebuildWidgets() {
+      this.catalogScroll = this.catalogList != null
+         ? this.catalogList.getScroll()
+         : (this.inventoryList != null ? this.inventoryList.getScroll() : this.catalogScroll);
+      if (this.bannedList != null) {
+         this.bannedScroll = this.bannedList.getScroll();
+      }
+
+      super.rebuildWidgets();
+   }
+
+   // ------------------------------------------------------------------ seleccion
+
+   /**
+    * Seleccionar no cambia nada en el servidor y no reconstruye la pantalla: el
+    * resaltado y el texto son instantaneos.
+    */
+   private void selectItem(Item item) {
+      this.selectedItem = RegistryLists.id(item);
+      this.selectedCategory = null;
+
+      // Que el resaltado se vea en las dos listas, no solo en la que se pulso.
+      if (this.catalogList != null) {
+         this.catalogList.setSelected(item);
+      }
+      if (this.bannedList != null) {
+         this.bannedList.setSelected(item);
+      }
+
+      Sfx.click();
+   }
+
+   private void selectCategory(ResourceKey<CreativeModeTab> key, String name) {
+      this.selectedCategory = key;
+      this.selectedCategoryName = name;
+      this.selectedCategorySize = RegistryLists.itemsOfTab(key).size();
+      this.selectedItem = null;
+      Sfx.click();
+   }
+
+   private boolean hasSelection() {
+      return this.selectedItem != null || this.selectedCategory != null;
+   }
 
    private BanMode modeOf(Item item) {
       return ClientHooks.mode(RegistryLists.id(item));
@@ -68,21 +138,35 @@ public final class RecipeBanScreen extends Screen {
       return BanMode.tagOf(this.modeOf(item));
    }
 
-   /** Aplica un modo (o {@code null} para desbanear) a un item. */
-   private void apply(Item item, BanMode mode) {
-      ResourceLocation id = RegistryLists.id(item);
-      if (id != null) {
-         ClientHooks.setLocal(id, mode);
-         Net.CHANNEL.sendToServer(new ToggleBanPacket(id, mode));
-      }
-   }
+   // ------------------------------------------------------------------ acciones
 
-   /** Clic en una fila del catalogo: alterna entre el modo activo y "sin baneo". */
-   private void toggleWithActiveMode(Item item) {
-      BanMode current = this.modeOf(item);
-      BanMode target = current == this.activeMode ? null : this.activeMode;
-      this.apply(item, target);
-      if (target == null) {
+   /** Aplica un modo ({@code null} = desbanear) a lo que este seleccionado. */
+   private void applyToSelection(BanMode mode) {
+      if (this.selectedItem != null) {
+         ClientHooks.setLocal(this.selectedItem, mode);
+         Net.CHANNEL.sendToServer(new ToggleBanPacket(this.selectedItem, mode));
+      } else {
+         if (this.selectedCategory == null) {
+            return;
+         }
+
+         List<ResourceLocation> ids = new ArrayList<>();
+         for (Item it : RegistryLists.itemsOfTab(this.selectedCategory)) {
+            ResourceLocation id = RegistryLists.id(it);
+            if (id != null) {
+               ids.add(id);
+               ClientHooks.setLocal(id, mode);
+            }
+         }
+
+         if (ids.isEmpty()) {
+            return;
+         }
+
+         Net.CHANNEL.sendToServer(BulkBanPacket.set(ids, mode));
+      }
+
+      if (mode == null) {
          Sfx.click();
       } else {
          Sfx.success();
@@ -94,55 +178,51 @@ public final class RecipeBanScreen extends Screen {
    // ------------------------------------------------------------------ layout
 
    protected void init() {
-      this.panelW = Math.min(this.width - 16, 480);
-      this.panelH = Math.min(this.height - 16, 316);
+      this.panelW = Math.min(this.width - 16, 500);
+      this.panelH = Math.min(this.height - 16, 340);
       this.leftPos = (this.width - this.panelW) / 2;
       this.topPos = (this.height - this.panelH) / 2;
       this.labels.clear();
+      this.catalogList = null;
+      this.inventoryList = null;
       this.gameItemTotal = RegistryLists.items().size();
 
       int x = this.bodyX();
       int y = this.bodyY();
+      int bodyH = this.bodyH();
       int colW = (this.bodyW() - 8) / 2;
       int rightX = x + colW + 8;
       int halfW = (colW - 2) / 2;
 
-      // --- fila superior izquierda: fuente + modo de baneo ---
+      int listY = y + 38;
+      // La lista acaba 100px antes del final del cuerpo: ahi van el texto de seleccion,
+      // la barra de acciones y las tres filas de categorias.
+      int listH = Math.max(36, bodyH - 138);
+      int actionY = y + bodyH - 84;
+      int r1 = y + bodyH - 58;
+      int r2 = y + bodyH - 40;
+      int r3 = y + bodyH - 22;
+
+      // --- columna izquierda: fuente + buscador + catalogo ---
       this.addRenderableWidget(
-         Button.builder(Component.literal(this.fromInventory ? "Fuente: §bInv." : "Fuente: §eReg."), b -> {
+         Button.builder(Component.literal(this.fromInventory ? "Fuente: §bInventario" : "Fuente: §eRegistro"), b -> {
                this.fromInventory = !this.fromInventory;
+               this.catalogScroll = 0;
                Sfx.click();
                this.rebuildWidgets();
             })
             .tooltip(
                Tooltip.create(
-                  Component.literal("Registro = todos los items del juego (todos los mods).\nInventario = los items que llevas encima.")
+                  Component.literal("Registro = todos los items del juego, de todos los mods.\nInventario = solo los que llevas encima.")
                )
             )
-            .bounds(x, y, halfW, 16)
-            .build()
-      );
-      this.addRenderableWidget(
-         Button.builder(Component.literal("Modo: " + this.activeMode.display()), b -> {
-               this.activeMode = this.activeMode == BanMode.RECIPE ? BanMode.ITEM : BanMode.RECIPE;
-               Sfx.click();
-               this.rebuildWidgets();
-            })
-            .tooltip(Tooltip.create(Component.literal(MODE_TOOLTIP)))
-            .bounds(x + halfW + 2, y, colW - halfW - 2, 16)
+            .bounds(x, y, colW, 16)
             .build()
       );
 
       EditBox search = new EditBox(this.font, x, y + 18, colW, 16, Component.empty());
       search.setHint(Component.literal("Buscar item..."));
-      this.addRenderableWidget(search);
 
-      int listY = y + 38;
-      // 4 filas de botones de 18px + una fila de texto: la lista acaba en bodyH-88.
-      int bottomRows = 86;
-      int listH = this.bodyH() - 38 - bottomRows - 2;
-
-      // --- catalogo ---
       if (this.fromInventory) {
          List<ItemStack> inv = new ArrayList<>();
          Player p = this.minecraft != null ? this.minecraft.player : null;
@@ -165,10 +245,14 @@ public final class RecipeBanScreen extends Screen {
                stx -> stx
             )
             .withTag(stx -> this.tagOf(stx.getItem()))
-            .onSelect(stx -> this.toggleWithActiveMode(stx.getItem()));
+            .onSelect(stx -> this.selectItem(stx.getItem()));
          list.setItems(inv);
+         this.inventoryList = list;
          this.catalogCount = inv.size();
-         search.setResponder(list::setQuery);
+         search.setResponder(text -> {
+            this.catalogQuery = text;
+            list.setQuery(text);
+         });
          this.addRenderableWidget(list);
          if (inv.isEmpty()) {
             this.addLabel("§7Tu inventario esta vacio.", x + 2, listY + 4);
@@ -178,32 +262,22 @@ public final class RecipeBanScreen extends Screen {
                x, listY, colW, listH, 18, RegistryLists::itemName, it -> RegistryLists.itemName(it) + " " + RegistryLists.itemId(it), ItemStack::new
             )
             .withTag(this::tagOf)
-            .onSelect(this::toggleWithActiveMode);
+            .onSelect(this::selectItem);
          List<Item> allItems = RegistryLists.items();
          list.setItems(allItems);
+         this.catalogList = list;
          this.catalogCount = allItems.size();
-         search.setResponder(list::setQuery);
+         search.setResponder(text -> {
+            this.catalogQuery = text;
+            list.setQuery(text);
+         });
          this.addRenderableWidget(list);
       }
 
-      int bw = colW / 3 - 2;
-      int r1 = y + this.bodyH() - 72;
-      int r2 = y + this.bodyH() - 54;
-      int r3 = y + this.bodyH() - 36;
-      int r4 = y + this.bodyH() - 18;
+      search.setValue(this.catalogQuery);
+      this.addRenderableWidget(search);
 
-      // --- categorias (aplican el modo activo de golpe) ---
-      this.addRenderableWidget(this.catButton("Bloques", x, r1, bw, CreativeModeTabs.BUILDING_BLOCKS));
-      this.addRenderableWidget(this.catButton("Naturales", x + bw + 2, r1, bw, CreativeModeTabs.NATURAL_BLOCKS));
-      this.addRenderableWidget(this.catButton("Funcional", x + 2 * (bw + 2), r1, bw, CreativeModeTabs.FUNCTIONAL_BLOCKS));
-      this.addRenderableWidget(this.catButton("Combate", x, r2, bw, CreativeModeTabs.COMBAT));
-      this.addRenderableWidget(this.catButton("Herram.", x + bw + 2, r2, bw, CreativeModeTabs.TOOLS_AND_UTILITIES));
-      this.addRenderableWidget(this.catButton("Redstone", x + 2 * (bw + 2), r2, bw, CreativeModeTabs.REDSTONE_BLOCKS));
-      this.addRenderableWidget(this.catButton("Comida", x, r3, bw, CreativeModeTabs.FOOD_AND_DRINKS));
-      this.addRenderableWidget(this.catButton("Ingred.", x + bw + 2, r3, bw, CreativeModeTabs.INGREDIENTS));
-      this.addRenderableWidget(this.catButton("Deco", x + 2 * (bw + 2), r3, bw, CreativeModeTabs.COLORED_BLOCKS));
-
-      // --- columna derecha: baneados ---
+      // --- columna derecha: filtro + buscador + baneados ---
       Map<ResourceLocation, BanMode> bans = ClientHooks.bans();
       int recipeCount = 0;
       int itemCount = 0;
@@ -229,13 +303,14 @@ public final class RecipeBanScreen extends Screen {
       bannedItems.sort((a, b) -> RegistryLists.itemId(a).compareTo(RegistryLists.itemId(b)));
 
       String viewLabel = switch (this.bannedView) {
-         case VIEW_RECIPE -> "Ver: §eSolo receta";
-         case VIEW_ITEM -> "Ver: §cItem completo";
-         default -> "Ver: §fTodos";
+         case VIEW_RECIPE -> "Ver: §esolo receta";
+         case VIEW_ITEM -> "Ver: §citem completo";
+         default -> "Ver: §ftodos";
       };
       this.addRenderableWidget(
          Button.builder(Component.literal(viewLabel), b -> {
                this.bannedView = (this.bannedView + 1) % 3;
+               this.bannedScroll = 0;
                Sfx.click();
                this.rebuildWidgets();
             })
@@ -246,21 +321,54 @@ public final class RecipeBanScreen extends Screen {
 
       EditBox bannedSearch = new EditBox(this.font, rightX, y + 18, colW, 16, Component.empty());
       bannedSearch.setHint(Component.literal("Buscar baneado..."));
-      this.addRenderableWidget(bannedSearch);
 
       ScrollSelector<Item> banned = new ScrollSelector<>(
             rightX, listY, colW, listH, 18, RegistryLists::itemName, it -> RegistryLists.itemName(it) + " " + RegistryLists.itemId(it), ItemStack::new
          )
          .withTag(this::tagOf)
-         .onSelect(it -> {
-            this.apply(it, null);
-            Sfx.click();
-            this.rebuildWidgets();
-         });
+         .onSelect(this::selectItem);
       banned.setItems(bannedItems);
-      bannedSearch.setResponder(banned::setQuery);
+      this.bannedList = banned;
+      bannedSearch.setResponder(text -> {
+         this.bannedQuery = text;
+         banned.setQuery(text);
+      });
       this.addRenderableWidget(banned);
+      bannedSearch.setValue(this.bannedQuery);
+      this.addRenderableWidget(bannedSearch);
 
+      // --- barra de acciones: se aplica a lo seleccionado ---
+      int actionW = (this.bodyW() - 8) / 3;
+      this.banRecipeButton = Button.builder(Component.literal("§eBanear receta"), b -> this.applyToSelection(BanMode.RECIPE))
+         .tooltip(Tooltip.create(Component.literal(TIP_RECIPE)))
+         .bounds(x, actionY, actionW, 20)
+         .build();
+      this.banItemButton = Button.builder(Component.literal("§cBanear item"), b -> this.applyToSelection(BanMode.ITEM))
+         .tooltip(Tooltip.create(Component.literal(TIP_ITEM)))
+         .bounds(x + actionW + 4, actionY, actionW, 20)
+         .build();
+      this.unbanButton = Button.builder(Component.literal("§aDesbanear"), b -> this.applyToSelection(null))
+         .tooltip(Tooltip.create(Component.literal(TIP_UNBAN)))
+         .bounds(x + 2 * (actionW + 4), actionY, this.bodyW() - 2 * (actionW + 4), 20)
+         .build();
+      this.addRenderableWidget(this.banRecipeButton);
+      this.addRenderableWidget(this.banItemButton);
+      this.addRenderableWidget(this.unbanButton);
+      this.updateActionButtons();
+
+      // --- categorias: seleccionan, no aplican ---
+      int bw = colW / 3 - 2;
+      this.addRenderableWidget(this.catButton("Bloques", x, r1, bw, CreativeModeTabs.BUILDING_BLOCKS));
+      this.addRenderableWidget(this.catButton("Naturales", x + bw + 2, r1, bw, CreativeModeTabs.NATURAL_BLOCKS));
+      this.addRenderableWidget(this.catButton("Funcional", x + 2 * (bw + 2), r1, bw, CreativeModeTabs.FUNCTIONAL_BLOCKS));
+      this.addRenderableWidget(this.catButton("Combate", x, r2, bw, CreativeModeTabs.COMBAT));
+      this.addRenderableWidget(this.catButton("Herram.", x + bw + 2, r2, bw, CreativeModeTabs.TOOLS_AND_UTILITIES));
+      this.addRenderableWidget(this.catButton("Redstone", x + 2 * (bw + 2), r2, bw, CreativeModeTabs.REDSTONE_BLOCKS));
+      this.addRenderableWidget(this.catButton("Comida", x, r3, bw, CreativeModeTabs.FOOD_AND_DRINKS));
+      this.addRenderableWidget(this.catButton("Ingred.", x + bw + 2, r3, bw, CreativeModeTabs.INGREDIENTS));
+      this.addRenderableWidget(this.catButton("Deco", x + 2 * (bw + 2), r3, bw, CreativeModeTabs.COLORED_BLOCKS));
+
+      // --- limpiezas masivas ---
       final int recipeTotal = recipeCount;
       final int itemTotal = itemCount;
 
@@ -294,7 +402,7 @@ public final class RecipeBanScreen extends Screen {
                this.rebuildWidgets();
             })
             .tooltip(Tooltip.create(Component.literal("Quita TODOS los baneos, de los dos tipos.")))
-            .bounds(rightX, r4, colW, 16)
+            .bounds(rightX, r3, colW, 16)
             .build()
       );
 
@@ -304,40 +412,62 @@ public final class RecipeBanScreen extends Screen {
             .build()
       );
 
+      // --- textos ---
       String fuente = this.fromInventory ? "inventario" : "todos los mods";
-      this.addLabel("§eCatalogo §f" + this.catalogCount + " items §7(" + fuente + ")", x + 2, y + this.bodyH() - 86);
-      this.addLabel("§7Clic = aplicar/quitar el modo activo", x + 2, r4 + 4);
-      this.addLabel("§cBaneados §7(clic = desbanear)", rightX + 2, y - 12);
+      this.addLabel("§eCatalogo §f" + this.catalogCount + " items §7(" + fuente + ")", x + 2, y - 12);
+      this.addLabel("§cBaneados §7(clic para seleccionar)", rightX + 2, y - 12);
+      this.addLabel("§7Categorias §8(seleccionan, luego pulsa una accion)", x + 2, r1 - 11);
       this.addLabel("§eSolo receta: §f" + recipeCount + "  §cItem completo: §f" + itemCount, rightX + 2, r1 + 4);
+
+      // Restaurar posicion de scroll y resaltado de la seleccion.
+      if (this.catalogList != null) {
+         this.catalogList.setScroll(this.catalogScroll);
+         if (this.selectedItem != null) {
+            this.catalogList.setSelected(ForgeRegistries.ITEMS.getValue(this.selectedItem));
+         }
+      }
+
+      if (this.inventoryList != null) {
+         this.inventoryList.setScroll(this.catalogScroll);
+      }
+
+      this.bannedList.setScroll(this.bannedScroll);
+      if (this.selectedItem != null) {
+         this.bannedList.setSelected(ForgeRegistries.ITEMS.getValue(this.selectedItem));
+      }
    }
 
    private Button catButton(String label, int x, int y, int w, ResourceKey<CreativeModeTab> key) {
-      BanMode mode = this.activeMode;
-      return Button.builder(Component.literal(label), b -> {
-            List<ResourceLocation> ids = new ArrayList<>();
-
-            for (Item it : RegistryLists.itemsOfTab(key)) {
-               ResourceLocation id = RegistryLists.id(it);
-               if (id != null) {
-                  ids.add(id);
-                  ClientHooks.setLocal(id, mode);
-               }
-            }
-
-            if (!ids.isEmpty()) {
-               Net.CHANNEL.sendToServer(BulkBanPacket.set(ids, mode));
-               Sfx.success();
-            }
-
+      boolean active = key.equals(this.selectedCategory);
+      return Button.builder(Component.literal(active ? "§a> " + label : label), b -> {
+            this.selectCategory(key, label);
             this.rebuildWidgets();
          })
-         .tooltip(
-            Tooltip.create(
-               Component.literal("Aplica el modo activo (" + mode.display() + "§r) a TODOS los items de esta categoria de golpe.")
-            )
-         )
+         .tooltip(Tooltip.create(Component.literal("Selecciona TODOS los items de esta categoria.\n\n§7Luego pulsa una de las tres acciones de arriba para aplicarsela de golpe.")))
          .bounds(x, y, w, 16)
          .build();
+   }
+
+   /** Texto que dice exactamente sobre que van a actuar los botones. */
+   private String selectionText() {
+      if (this.selectedItem != null) {
+         Item item = ForgeRegistries.ITEMS.getValue(this.selectedItem);
+         String name = item != null ? RegistryLists.itemName(item) : this.selectedItem.toString();
+         BanMode mode = ClientHooks.mode(this.selectedItem);
+         String estado = mode == null ? "§7sin baneo" : mode.display();
+         return "§fSeleccionado: §b" + name + " §7- ahora: " + estado;
+      } else if (this.selectedCategory != null) {
+         return "§fSeleccionado: §dcategoria " + this.selectedCategoryName + " §7(" + this.selectedCategorySize + " items)";
+      } else {
+         return "§8Selecciona un item o una categoria, y pulsa una accion.";
+      }
+   }
+
+   private void updateActionButtons() {
+      boolean any = this.hasSelection();
+      this.banRecipeButton.active = any;
+      this.banItemButton.active = any;
+      this.unbanButton.active = any;
    }
 
    private int bodyX() {
@@ -345,7 +475,7 @@ public final class RecipeBanScreen extends Screen {
    }
 
    private int bodyY() {
-      return this.topPos + 40;
+      return this.topPos + 46;
    }
 
    private int bodyW() {
@@ -353,7 +483,7 @@ public final class RecipeBanScreen extends Screen {
    }
 
    private int bodyH() {
-      return this.panelH - 40 - 28;
+      return this.panelH - 46 - 28;
    }
 
    private void addLabel(String text, int x, int y) {
@@ -367,7 +497,7 @@ public final class RecipeBanScreen extends Screen {
       g.fill(this.leftPos, this.topPos, this.leftPos + this.panelW, this.topPos + this.panelH, -535160294);
       g.fill(this.leftPos, this.topPos, this.leftPos + this.panelW, this.topPos + 18, -14013910);
       g.fill(this.leftPos, this.topPos + this.panelH - 1, this.leftPos + this.panelW, this.topPos + this.panelH, -12961222);
-      g.fill(this.leftPos + 6, this.topPos + 34, this.leftPos + this.panelW - 6, this.topPos + 35, -12961222);
+      g.fill(this.leftPos + 6, this.topPos + 32, this.leftPos + this.panelW - 6, this.topPos + 33, -12961222);
 
       int recipeCount = 0;
       int itemCount = 0;
@@ -387,11 +517,24 @@ public final class RecipeBanScreen extends Screen {
          16777215,
          false
       );
+      g.drawString(
+         this.font,
+         "§7Baneo de §ereceta§7: no se puede craftear. Baneo de §citem§7: no se puede ni tener.",
+         this.leftPos + 8,
+         this.topPos + 22,
+         14737632,
+         false
+      );
+
+      this.updateActionButtons();
       super.render(g, mouseX, mouseY, partial);
 
       for (RecipeBanScreen.Label l : this.labels) {
          g.drawString(this.font, l.text, l.x, l.y, 14737632, false);
       }
+
+      // El texto de seleccion se redibuja aparte: cambia sin reconstruir la pantalla.
+      g.drawString(this.font, this.selectionText(), this.bodyX() + 2, this.bodyY() + this.bodyH() - 96, 16777215, false);
    }
 
    public boolean isPauseScreen() {

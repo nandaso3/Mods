@@ -1,16 +1,10 @@
 package com.fsrecipes;
 
 import com.fsrecipes.compat.CuriosCompat;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Set;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
@@ -188,13 +182,16 @@ public final class ItemBanEnforcer {
       }
    }
 
-   /** Los chunks que se cargan despues de aplicar el baneo tambien se limpian. */
+   /**
+    * Los chunks que se cargan despues de aplicar el baneo tambien se limpian, pero en
+    * cola: barrer aqui mismo se notaria con un jugador volando.
+    */
    @SubscribeEvent
    public static void onChunkLoad(ChunkEvent.Load event) {
       if (RecipeBans.hasItemBans()
-            && !event.getLevel().isClientSide()
+            && event.getLevel() instanceof ServerLevel level
             && event.getChunk() instanceof LevelChunk chunk) {
-         DeepSweeper.sweepChunk(chunk);
+         BanTasks.enqueueChunk(level, chunk.getPos());
       }
    }
 
@@ -217,66 +214,6 @@ public final class ItemBanEnforcer {
          event.setCanceled(true);
          event.getPlayer().containerMenu.broadcastChanges();
       }
-   }
-
-   /**
-    * Purga puntual de todo lo que este cargado. Se lanza al aplicar un baneo de item;
-    * de los chunks que se carguen despues se encarga {@link #onChunkLoad}.
-    */
-   public static void purgeEverything(MinecraftServer server) {
-      if (server == null || !RecipeBans.hasItemBans()) {
-         return;
-      }
-
-      long start = System.nanoTime();
-      int removed = 0;
-      int chunks = 0;
-      int view = Math.max(2, server.getPlayerList().getViewDistance() + 1);
-
-      for (ServerLevel level : server.getAllLevels()) {
-         ServerChunkCache source = level.getChunkSource();
-         Set<Long> visited = new HashSet<>();
-         List<ChunkPos> targets = new ArrayList<>();
-
-         for (ServerPlayer sp : level.players()) {
-            ChunkPos center = sp.chunkPosition();
-            for (int dx = -view; dx <= view; dx++) {
-               for (int dz = -view; dz <= view; dz++) {
-                  targets.add(new ChunkPos(center.x + dx, center.z + dz));
-               }
-            }
-         }
-
-         for (long packed : level.getForcedChunks()) {
-            targets.add(new ChunkPos(packed));
-         }
-
-         for (ChunkPos pos : targets) {
-            if (visited.add(pos.toLong())) {
-               LevelChunk chunk = source.getChunkNow(pos.x, pos.z);
-               if (chunk != null) {
-                  chunks++;
-                  removed += DeepSweeper.sweepChunk(chunk);
-               }
-            }
-         }
-
-         for (Entity entity : level.getAllEntities()) {
-            if (!(entity instanceof Player)) {
-               removed += DeepSweeper.sweepEntity(entity);
-            }
-         }
-      }
-
-      sweepAll(server);
-
-      long ms = (System.nanoTime() - start) / 1000000L;
-      FSRecipes.LOGGER.info(
-         "[FantasticRecipes] Purga de items prohibidos: {} stack(s) eliminados en {} chunk(s) cargados ({} ms).",
-         removed,
-         chunks,
-         ms
-      );
    }
 
    // ------------------------------------------------------------------ uso

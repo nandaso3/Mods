@@ -175,6 +175,11 @@ public final class RecipeBans {
       }
    }
 
+   /** Escritura efectiva del JSON. La llama {@link BanTasks} de forma diferida. */
+   static synchronized void saveNow() {
+      saveToDisk();
+   }
+
    private static synchronized void saveToDisk() {
       JsonObject root = new JsonObject();
       root.add("recipes", sortedArray(RECIPE_BANS));
@@ -215,9 +220,10 @@ public final class RecipeBans {
          return false;
       }
 
+      boolean newItemBan = mode == BanMode.ITEM && !ITEM_BANS.contains(itemId);
       boolean changed = apply(itemId, mode);
       if (changed) {
-         afterChange(server);
+         afterChange(server, newItemBan);
       }
       return changed;
    }
@@ -225,14 +231,22 @@ public final class RecipeBans {
    /** Aplica (o quita) un baneo a varios items de golpe. Devuelve cuantos cambiaron. */
    public static synchronized int setBanBulk(MinecraftServer server, List<ResourceLocation> ids, BanMode mode) {
       int n = 0;
+      boolean newItemBan = false;
+
       for (ResourceLocation id : ids) {
-         if (id != null && apply(id, mode)) {
-            n++;
+         if (id != null) {
+            if (mode == BanMode.ITEM && !ITEM_BANS.contains(id)) {
+               newItemBan = true;
+            }
+
+            if (apply(id, mode)) {
+               n++;
+            }
          }
       }
 
       if (n > 0) {
-         afterChange(server);
+         afterChange(server, newItemBan);
       }
       return n;
    }
@@ -243,7 +257,7 @@ public final class RecipeBans {
       if (n > 0) {
          RECIPE_BANS.clear();
          ITEM_BANS.clear();
-         afterChange(server);
+         afterChange(server, false);
       }
       return n;
    }
@@ -254,7 +268,7 @@ public final class RecipeBans {
       int n = target.size();
       if (n > 0) {
          target.clear();
-         afterChange(server);
+         afterChange(server, false);
       }
       return n;
    }
@@ -276,14 +290,35 @@ public final class RecipeBans {
       return true;
    }
 
-   private static void afterChange(MinecraftServer server) {
+   /**
+    * Todo lo barato va aqui y ahora; lo caro lo agrupa {@link BanTasks} para no
+    * congelar el tick en cada clic.
+    *
+    * @param newItemBan si el cambio añadio algun item nuevo en modo ITEM, lo unico que
+    *                   obliga a repasar los inventarios del mundo
+    */
+   private static void afterChange(MinecraftServer server, boolean newItemBan) {
       rebuildItemCache();
-      saveToDisk();
+      BanTasks.markSaveDirty();
+
       if (server != null) {
-         applyToManager(server.getRecipeManager(), server.registryAccess(), false);
-         resyncClients(server);
-         // Purga puntual: inventarios, contenedores cargados y entidades.
-         ItemBanEnforcer.purgeEverything(server);
+         // Inmediato: el crafteo queda bloqueado en este mismo tick.
+         boolean recipesChanged = applyToManager(server.getRecipeManager(), server.registryAccess(), false);
+
+         // Inmediato: son unos bytes, y es lo que mueve la GUI y los tooltips.
+         if (Net.CHANNEL != null) {
+            Net.CHANNEL.send(PacketDistributor.ALL.noArg(), new SyncBansPacket(snapshot()));
+         }
+
+         // Diferido: el libro de recetas es enorme, y solo si de verdad cambio.
+         if (recipesChanged) {
+            BanTasks.markRecipeSyncDirty();
+         }
+
+         // Repartido entre ticks: inventarios, contenedores y entidades.
+         if (newItemBan) {
+            BanTasks.requestPurge(server);
+         }
       }
    }
 
@@ -305,33 +340,50 @@ public final class RecipeBans {
 
    // ------------------------------------------------------------------ recetas
 
-   public static synchronized void applyToManager(RecipeManager rm, RegistryAccess registryAccess, boolean freshReload) {
-      if (rm != null) {
-         Map<ResourceLocation, Recipe<?>> full = new LinkedHashMap<>();
-
-         for (Recipe<?> r : rm.getRecipes()) {
-            full.put(r.getId(), r);
-         }
-
-         if (!freshReload) {
-            for (Recipe<?> r : REMOVED.values()) {
-               full.putIfAbsent(r.getId(), r);
-            }
-         }
-
-         REMOVED.clear();
-         List<Recipe<?>> keep = new ArrayList<>(full.size());
-
-         for (Recipe<?> r : full.values()) {
-            if (isBannedOutput(r, registryAccess)) {
-               REMOVED.put(r.getId(), r);
-            } else {
-               keep.add(r);
-            }
-         }
-
-         rm.replaceRecipes(keep);
+   /**
+    * Recalcula que recetas sobran y se las pasa al RecipeManager.
+    *
+    * @return true si el conjunto de recetas eliminadas cambio. Si no cambio no se toca
+    *         el manager ni hace falta reenviar el libro de recetas a los clientes, que
+    *         es justo la parte cara. Banear un item que no tiene ninguna receta
+    *         (o pasar de "solo receta" a "item completo") sale gratis por aqui.
+    */
+   public static synchronized boolean applyToManager(RecipeManager rm, RegistryAccess registryAccess, boolean freshReload) {
+      if (rm == null) {
+         return false;
       }
+
+      Map<ResourceLocation, Recipe<?>> full = new LinkedHashMap<>();
+
+      for (Recipe<?> r : rm.getRecipes()) {
+         full.put(r.getId(), r);
+      }
+
+      if (!freshReload) {
+         for (Recipe<?> r : REMOVED.values()) {
+            full.putIfAbsent(r.getId(), r);
+         }
+      }
+
+      Map<ResourceLocation, Recipe<?>> removed = new LinkedHashMap<>();
+      List<Recipe<?>> keep = new ArrayList<>(full.size());
+
+      for (Recipe<?> r : full.values()) {
+         if (isBannedOutput(r, registryAccess)) {
+            removed.put(r.getId(), r);
+         } else {
+            keep.add(r);
+         }
+      }
+
+      if (!freshReload && removed.keySet().equals(REMOVED.keySet())) {
+         return false;
+      }
+
+      REMOVED.clear();
+      REMOVED.putAll(removed);
+      rm.replaceRecipes(keep);
+      return true;
    }
 
    private static boolean isBannedOutput(Recipe<?> recipe, RegistryAccess registryAccess) {
@@ -354,16 +406,24 @@ public final class RecipeBans {
    }
 
    /**
-    * Reenvia a todos los clientes conectados el libro de recetas vigente y el estado
-    * de baneos (para que la GUI y los tooltips esten al dia).
+    * Reenvia el libro de recetas completo. Es un paquete muy gordo (lleva todas las
+    * recetas del juego), asi que solo se llama desde {@link BanTasks} una vez por
+    * rafaga de cambios, nunca en cada clic.
     */
-   public static void resyncClients(MinecraftServer server) {
+   static void sendRecipeBook(MinecraftServer server) {
       if (server != null) {
          ClientboundUpdateRecipesPacket pkt = new ClientboundUpdateRecipesPacket(server.getRecipeManager().getRecipes());
 
          for (ServerPlayer p : server.getPlayerList().getPlayers()) {
             p.connection.send(pkt);
          }
+      }
+   }
+
+   /** Manda a los clientes el estado de baneos (barato) y el libro de recetas (caro). */
+   public static void resyncClients(MinecraftServer server) {
+      if (server != null) {
+         sendRecipeBook(server);
 
          if (Net.CHANNEL != null) {
             Net.CHANNEL.send(PacketDistributor.ALL.noArg(), new SyncBansPacket(snapshot()));

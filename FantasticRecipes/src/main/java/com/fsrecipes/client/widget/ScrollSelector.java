@@ -71,6 +71,7 @@ public class ScrollSelector<T> extends AbstractWidget {
    }
 
    private void applyFilter() {
+      T previous = this.getSelected();
       this.filtered.clear();
       if (this.query.isEmpty()) {
          this.filtered.addAll(this.all);
@@ -83,8 +84,40 @@ public class ScrollSelector<T> extends AbstractWidget {
          }
       }
 
-      this.scroll = 0;
-      this.selectedIndex = -1;
+      this.scroll = Math.min(this.scroll, this.maxScroll());
+      // La seleccion sigue al valor, no a la posicion: filtrar no debe perderla.
+      this.selectedIndex = previous == null ? -1 : this.filtered.indexOf(previous);
+   }
+
+   public T getSelected() {
+      return this.selectedIndex >= 0 && this.selectedIndex < this.filtered.size() ? this.filtered.get(this.selectedIndex) : null;
+   }
+
+   public void setSelected(T value) {
+      this.selectedIndex = value == null ? -1 : this.filtered.indexOf(value);
+   }
+
+   public int getScroll() {
+      return this.scroll;
+   }
+
+   /** Restaura la posicion del scroll (al reconstruir la pantalla, para no dar saltos). */
+   public void setScroll(int value) {
+      this.scroll = Math.max(0, Math.min(this.maxScroll(), value));
+   }
+
+   /** Deja visible la fila seleccionada. */
+   public void scrollToSelection() {
+      if (this.selectedIndex >= 0) {
+         int rows = this.visibleRows();
+         if (this.selectedIndex < this.scroll) {
+            this.scroll = this.selectedIndex;
+         } else if (this.selectedIndex >= this.scroll + rows) {
+            this.scroll = this.selectedIndex - rows + 1;
+         }
+
+         this.scroll = Math.max(0, Math.min(this.maxScroll(), this.scroll));
+      }
    }
 
    private int visibleRows() {

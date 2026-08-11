@@ -38,7 +38,7 @@ public final class BanReloadListener implements PreparableReloadListener {
          if (server != null) {
             // Si el JSON se edito a mano, clientes e inventarios se ponen al dia.
             RecipeBans.resyncClients(server);
-            ItemBanEnforcer.purgeEverything(server);
+            BanTasks.requestPurge(server);
          }
       }, gameExecutor);
    }
