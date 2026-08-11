@@ -1,6 +1,7 @@
 package com.fscrates.client;
 
 import com.fscrates.block.CrateBlockEntity;
+import com.fscrates.FSCrates;
 import com.fscrates.client.screen.CrateCinematicScreen;
 import com.fscrates.client.screen.CrateEditorScreen;
 import com.fscrates.client.screen.CratePreOpenScreen;
@@ -27,6 +28,24 @@ public final class ClientPacketHandler {
         Minecraft.getInstance().setScreen(new CrateEditorScreen(cfg, pos));
     }
 
+    /**
+     * Abre la pantalla de pre-apertura (la "sala de espera" con video y musica).
+     * No hace falta llave para llegar aqui; se pide al pulsar ABRIR.
+     */
+    public static void openPreview(CompoundTag configTag, BlockPos pos) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+
+        try {
+            CrateConfig config = CrateConfig.load(configTag);
+            mc.setScreen(new CratePreOpenScreen(config, pos));
+        } catch (Throwable t) {
+            FSCrates.LOGGER.error("[FSCrates] No se pudo abrir la pantalla de pre-apertura: {}", t.toString());
+        }
+    }
+
     public static void playAnimation(BlockPos pos, String animationId, int rarityColor, int winnerIndex, int winnerRarity, CompoundTag candidates, UUID opener) {
         Minecraft mc = Minecraft.getInstance();
         ClientLevel level = mc.level;
@@ -39,26 +58,15 @@ public final class ClientPacketHandler {
             boolean isInstant = "instant".equals(animationId);
             boolean cinematic = isOpener && cands != null && !cands.isEmpty() && !isInstant;
             if (cinematic) {
-                // Lo que se hacia antes directamente: abrir la cinematica.
-                // Ahora se ejecuta cuando el jugador pulsa "ABRIR" en la pre-apertura.
-                Runnable openCinematic = () -> {
-                    try {
-                        mc.setScreen(new CrateCinematicScreen(be.getConfig(), rarityColor, winnerRarity, winnerIndex, cands, candRarities));
-                    } catch (Throwable error) {
-                        be.startAnimation(animationId, rarityColor, winnerIndex, winnerRarity, candRarities, cands);
-                        return;
-                    }
-
-                    be.startSceneLid(rarityColor, winnerRarity, true);
-                };
-
+                // La pre-apertura ya paso: aqui se abre la cinematica directamente.
                 try {
-                    mc.setScreen(new CratePreOpenScreen(be.getConfig(), openCinematic));
+                    mc.setScreen(new CrateCinematicScreen(be.getConfig(), rarityColor, winnerRarity, winnerIndex, cands, candRarities));
                 } catch (Throwable error) {
-                    // Si la pre-apertura falla, no se pierde la apertura.
-                    openCinematic.run();
+                    be.startAnimation(animationId, rarityColor, winnerIndex, winnerRarity, candRarities, cands);
+                    return;
                 }
 
+                be.startSceneLid(rarityColor, winnerRarity, true);
                 return;
             }
 

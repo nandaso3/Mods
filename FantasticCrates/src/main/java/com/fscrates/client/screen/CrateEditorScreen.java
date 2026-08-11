@@ -19,6 +19,7 @@ import com.fscrates.network.SaveCratePacket;
 import com.fscrates.registry.ModRegistry;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Consumer;
 import java.util.Locale;
 import java.util.function.DoubleConsumer;
 import java.util.function.IntConsumer;
@@ -147,86 +148,203 @@ public class CrateEditorScreen extends Screen {
      * Se admiten codigos de color con &amp; (por ejemplo &amp;d&amp;lHola).
      */
     private void initMensajes() {
-        this.helpLine = "Textos de la pantalla de pre-apertura. Usa & para colores (&a, &l, &d...).";
+        this.helpLine = "Textos de la escena. Botones de color/arcoiris a la derecha de cada campo.";
         int x = this.bodyX();
-        int y = this.bodyY();
         int w = this.bodyW();
+        // Se lleva un cursor y se reserva sitio para lo de abajo: asi no puede
+        // quedar nada solapado ni saliendose del panel.
+        int y = this.bodyY();
+        final int bottom = this.bodyY() + this.bodyH();
 
-        this.addLabel("\u00a7e\u2726 Mensajes de la escena de pre-apertura", x, y, desc(
-            "Lo que ve el jugador antes de abrir la caja.",
-            "Se pueden usar codigos de color con &.",
-            "Deja un campo vac\u00edo para que no salga esa l\u00ednea."
+        int fxW = Math.max(48, this.font.width("Estilo") + 14);
+        int fieldW = Math.max(60, w - fxW - 4);
+
+        // --- 1) Linea de arriba
+        this.addLabel("\u00a77L\u00ednea de arriba \u00a78(encima del nombre)", x, y, desc(
+            "Sale encima del nombre de la caja.",
+            "Por defecto lleva el nombre del mod."
         ));
-
-        // --- Cabecera (encima del nombre de la crate)
-        this.addLabel("\u00a77L\u00ednea de arriba \u00a78(encima del nombre)", x, y + 16, null);
-        EditBox header = new EditBox(this.font, x, y + 26, w, 16, Component.empty());
-        header.setMaxLength(120);
-        header.setValue(this.config.sceneHeader == null ? "" : this.config.sceneHeader);
-        header.setHint(Component.literal("\u00a78&d\u2726 Fantastic Crates \u2726"));
-        header.setResponder(v -> this.config.sceneHeader = v);
-        this.addRenderableWidget(header);
-
-        // --- Nombre de la crate (el mismo campo que en INFO, por comodidad)
-        this.addLabel("\u00a77Nombre de la caja \u00a78(igual que en Info)", x, y + 48, null);
-        EditBox title = new EditBox(this.font, x, y + 58, w, 16, Component.empty());
-        title.setMaxLength(120);
-        title.setValue(this.config.displayName == null ? "" : this.config.displayName);
-        title.setResponder(v -> this.config.displayName = v);
-        this.addRenderableWidget(title);
-
-        // --- Subtitulo
-        this.addLabel("\u00a77L\u00ednea de abajo \u00a78(el \"prep\u00e1rate para abrir\")", x, y + 80, null);
-        EditBox subtitle = new EditBox(this.font, x, y + 90, w, 16, Component.empty());
-        subtitle.setMaxLength(160);
-        subtitle.setValue(this.config.sceneSubtitle == null ? "" : this.config.sceneSubtitle);
-        subtitle.setHint(Component.literal("\u00a78&7Prep\u00e1rate para abrir tu caja"));
-        subtitle.setResponder(v -> this.config.sceneSubtitle = v);
-        this.addRenderableWidget(subtitle);
-
-        // --- Lineas libres
-        this.addLabel("\u00a77Mensaje extra \u00a78(una l\u00ednea por rengl\u00f3n)", x, y + 112, desc(
-            "L\u00edneas libres debajo del subt\u00edtulo.",
-            "\u00daltil para avisos, eventos o normas."
-        ));
-        int listH = Math.max(34, this.bodyH() - 152);
-        ScrollSelector<String> lines = new ScrollSelector<>(
-            x, y + 122, w, listH, 14, line -> line, line -> line, null
+        y += 10;
+        y += this.addStyledField(
+            x, y, fieldW, fxW,
+            this.config.sceneHeader,
+            "\u00a78&d\u2726 Fantastic Crates \u2726",
+            v -> this.config.sceneHeader = v
         );
-        lines.setItems(new ArrayList<>(this.config.sceneLines));
-        lines.onSelect(line -> this.selectedSceneLine = line);
-        this.addRenderableWidget(lines);
 
-        int rowY = y + 122 + listH + 4;
-        int addW = Math.max(70, this.font.width("A\u00f1adir") + 20);
-        EditBox extra = new EditBox(this.font, x, rowY, w - addW - 4, 16, Component.empty());
-        extra.setMaxLength(160);
-        extra.setHint(Component.literal("\u00a78Escribe una l\u00ednea y pulsa A\u00f1adir"));
+        // --- 2) Nombre de la caja
+        this.addLabel("\u00a77Nombre de la caja \u00a78(igual que en Info)", x, y, null);
+        y += 10;
+        y += this.addStyledField(
+            x, y, fieldW, fxW,
+            this.config.displayName,
+            "\u00a78&d\u2726 Caja \u2726",
+            v -> this.config.displayName = v
+        );
+
+        // --- 3) Linea de abajo
+        this.addLabel("\u00a77L\u00ednea de abajo \u00a78(el \"prep\u00e1rate para abrir\")", x, y, null);
+        y += 10;
+        y += this.addStyledField(
+            x, y, fieldW, fxW,
+            this.config.sceneSubtitle,
+            "\u00a78&7Prep\u00e1rate para abrir tu caja",
+            v -> this.config.sceneSubtitle = v
+        );
+
+        // --- 4) Lineas extra
+        this.addLabel("\u00a77Mensaje extra \u00a78(" + this.config.sceneLines.size() + " l\u00ednea(s))", x, y, desc(
+            "L\u00edneas libres debajo del subt\u00edtulo.",
+            "Puedes a\u00f1adir todas las que quieras."
+        ));
+        y += 10;
+
+        // Las dos filas de abajo se ANCLAN al borde inferior del panel y la lista
+        // se queda con lo que sobre. Asi, por poca altura que haya, nunca se
+        // solapan ni se salen (con GUI scale alto el cuerpo es muy bajito).
+        final int actionsY = bottom - 16;
+        final int addRowY = actionsY - 20;
+        int listH = Math.max(0, addRowY - 4 - y);
+
+        if (listH >= 14) {
+            ScrollSelector<String> lines = new ScrollSelector<>(
+                x, y, w, listH, 14, line -> line, line -> line, null
+            );
+            lines.setItems(new ArrayList<>(this.config.sceneLines));
+            lines.onSelect(line -> this.selectedSceneLine = line);
+            this.addRenderableWidget(lines);
+        }
+
+        int addW = Math.max(60, this.font.width("A\u00f1adir") + 18);
+        EditBox extra = new EditBox(this.font, x, addRowY, Math.max(50, w - addW - 4), 16, Component.empty());
+        extra.setMaxLength(200);
+        extra.setHint(Component.literal("\u00a78Escribe y pulsa A\u00f1adir"));
         this.addRenderableWidget(extra);
-
         this.addRenderableWidget(Button.builder(Component.literal("\u00a7aA\u00f1adir"), b -> {
             String value = extra.getValue() == null ? "" : extra.getValue();
             if (!value.isBlank()) {
                 this.config.sceneLines.add(value);
                 extra.setValue("");
+                this.selectedSceneLine = null;
                 this.rebuildWidgets();
             }
-        }).bounds(x + w - addW, rowY, addW, 16).build());
+        }).bounds(x + w - addW, addRowY, addW, 16).build());
+
+        y = actionsY;
+
+        // Fila de acciones sobre la linea elegida.
+        int third = (w - 8) / 3;
+        boolean has = this.selectedSceneLine != null;
+        this.addRenderableWidget(
+            Button.builder(Component.literal(has ? "\u00a7bEstilo" : "\u00a78Estilo"), b -> {
+                if (this.selectedSceneLine != null) {
+                    this.openStyleEditor(this.selectedSceneLine, styled -> {
+                        int index = this.config.sceneLines.indexOf(this.selectedSceneLine);
+                        if (index >= 0) {
+                            this.config.sceneLines.set(index, styled);
+                            this.selectedSceneLine = styled;
+                        }
+                    });
+                }
+            }).bounds(x, y, third, 16).build()
+        );
+        this.addRenderableWidget(
+            Button.builder(Component.literal(has ? "\u00a7d\u2726 Arcoiris" : "\u00a78\u2726 Arcoiris"), b -> {
+                if (this.selectedSceneLine != null) {
+                    int index = this.config.sceneLines.indexOf(this.selectedSceneLine);
+                    if (index >= 0) {
+                        this.config.sceneLines.set(index, toggleRainbow(this.selectedSceneLine));
+                        this.selectedSceneLine = this.config.sceneLines.get(index);
+                        this.rebuildWidgets();
+                    }
+                }
+            }).bounds(x + third + 4, y, third, 16).build()
+        );
+        this.addRenderableWidget(
+            Button.builder(Component.literal(has ? "\u00a7cQuitar" : "\u00a78Quitar"), b -> {
+                if (this.selectedSceneLine != null) {
+                    this.config.sceneLines.remove(this.selectedSceneLine);
+                    this.selectedSceneLine = null;
+                    this.rebuildWidgets();
+                }
+            }).bounds(x + 2 * (third + 4), y, w - 2 * (third + 4), 16).build()
+        );
+    }
+
+    /**
+     * Campo de texto con un boton de estilo al lado.
+     *
+     * @return cuanto ha avanzado el cursor vertical
+     */
+    private int addStyledField(int x, int y, int fieldW, int fxW, String value, String hint, Consumer<String> setter) {
+        EditBox box = new EditBox(this.font, x, y, fieldW, 16, Component.empty());
+        box.setMaxLength(200);
+        box.setValue(value == null ? "" : value);
+        box.setHint(Component.literal(hint));
+        box.setResponder(setter);
+        this.addRenderableWidget(box);
 
         this.addRenderableWidget(
-            Button.builder(
-                    Component.literal(this.selectedSceneLine == null ? "\u00a78Quitar (elige una)" : "\u00a7cQuitar l\u00ednea"),
-                    b -> {
-                        if (this.selectedSceneLine != null) {
-                            this.config.sceneLines.remove(this.selectedSceneLine);
-                            this.selectedSceneLine = null;
-                            this.rebuildWidgets();
-                        }
-                    }
-                )
-                .bounds(x, rowY + 20, w, 16)
-                .build()
+            Button.builder(Component.literal("\u00a7bEstilo"), b -> this.openStyleEditor(box.getValue(), styled -> {
+                box.setValue(styled);
+                setter.accept(styled);
+            })).bounds(x + fieldW + 4, y, fxW, 16).build()
         );
+
+        return 20;
+    }
+
+    /**
+     * Abre el editor de color/estilo del mod y devuelve el texto ya formateado.
+     * Se conserva el texto plano y se le pone delante el color en hexadecimal,
+     * para poder usar cualquier RGB y no solo los 16 codigos clasicos.
+     */
+    private void openStyleEditor(String current, Consumer<String> result) {
+        String plain = stripCodes(current == null ? "" : current);
+        int initial = colorOf(current == null ? "" : current);
+        boolean[] flags = flagsOf(current == null ? "" : current);
+
+        this.minecraft.setScreen(
+            new FSTextStyleScreen(
+                "Estilo del mensaje",
+                plain.isEmpty() ? "Texto de ejemplo" : plain,
+                initial,
+                flags,
+                (rgb, bold, italic, underline, strike, obf) -> {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append(String.format("&#%06X", rgb & 0xFFFFFF));
+                    if (bold) {
+                        sb.append("&l");
+                    }
+                    if (italic) {
+                        sb.append("&o");
+                    }
+                    if (underline) {
+                        sb.append("&n");
+                    }
+                    if (strike) {
+                        sb.append("&m");
+                    }
+                    if (obf) {
+                        sb.append("&k");
+                    }
+                    sb.append(plain);
+                    result.accept(sb.toString());
+                },
+                () -> this.minecraft.setScreen(this)
+            )
+        );
+    }
+
+    /** Pone o quita la etiqueta de arcoiris de una linea. */
+    private static String toggleRainbow(String line) {
+        if (line == null) {
+            return "";
+        }
+        if (line.toLowerCase(Locale.ROOT).startsWith("<rainbow>")) {
+            return line.substring("<rainbow>".length());
+        }
+        return "<rainbow>" + stripCodes(line);
     }
 
     private int bodyX() {
@@ -246,42 +364,37 @@ public class CrateEditorScreen extends Screen {
     }
 
     /**
-     * Reparte las pestanas en filas midiendo el ancho REAL de cada etiqueta.
+     * Reparte las pestanas en filas de ancho FIJO e igual.
      *
-     * Antes se dividia el ancho a partes iguales suponiendo una fuente concreta,
-     * y con un resource pack de fuente distinta el texto no cabia y se solapaba
-     * entre botones. Ahora se mide con font.width() y se empaqueta en filas, asi
-     * que funciona con cualquier fuente.
+     * El reparto "listo" proporcional al texto daba problemas: con fuentes de
+     * resource pack unas filas quedaban con botones enormes y el texto se salia
+     * pisando al de al lado. Aqui todas las pestanas de una fila miden lo mismo y
+     * el texto se RECORTA si no cabe, asi que es imposible que se solape.
      */
     private List<List<CrateEditorScreen.Tab>> packTabs() {
+        CrateEditorScreen.Tab[] tabs = CrateEditorScreen.Tab.values();
         int available = this.panelWidth - 16;
-        List<List<CrateEditorScreen.Tab>> rows = new ArrayList<>();
-        List<CrateEditorScreen.Tab> row = new ArrayList<>();
-        int used = 0;
 
-        for (CrateEditorScreen.Tab tab : CrateEditorScreen.Tab.values()) {
-            int needed = this.tabMinWidth(tab);
-            int extra = row.isEmpty() ? needed : needed + TAB_GAP;
-            if (!row.isEmpty() && used + extra > available) {
-                rows.add(row);
-                row = new ArrayList<>();
-                used = 0;
-                extra = needed;
-            }
-            row.add(tab);
-            used += extra;
+        // Cuantas caben por fila con un ancho minimo digno para leer.
+        int widest = 0;
+        for (CrateEditorScreen.Tab tab : tabs) {
+            widest = Math.max(widest, this.font.width(tab.label));
         }
-        if (!row.isEmpty()) {
+        int minTab = Math.min(Math.max(38, widest + 10), Math.max(38, available / 4));
+        int perRow = Math.max(1, Math.min(tabs.length, (available + TAB_GAP) / (minTab + TAB_GAP)));
+        int rowCount = (tabs.length + perRow - 1) / perRow;
+        // Se reparten lo mas parejo posible entre las filas que hagan falta.
+        perRow = (tabs.length + rowCount - 1) / rowCount;
+
+        List<List<CrateEditorScreen.Tab>> rows = new ArrayList<>();
+        for (int i = 0; i < tabs.length; i += perRow) {
+            List<CrateEditorScreen.Tab> row = new ArrayList<>();
+            for (int j = i; j < Math.min(tabs.length, i + perRow); j++) {
+                row.add(tabs[j]);
+            }
             rows.add(row);
         }
         return rows;
-    }
-
-    /** Ancho minimo de una pestana: el texto en negrita (estado activo) mas margen. */
-    private int tabMinWidth(CrateEditorScreen.Tab tab) {
-        int textWidth = this.font.width(tab.label);
-        // La pestana activa se dibuja en negrita, que es un pixel mas ancha por caracter.
-        return textWidth + tab.label.length() + 10;
     }
 
     private void initHeader() {
@@ -291,34 +404,27 @@ public class CrateEditorScreen extends Screen {
         for (int r = 0; r < rows.size(); r++) {
             List<CrateEditorScreen.Tab> row = rows.get(r);
             int count = row.size();
-
-            // Se reparte el espacio sobrante entre las pestanas de la fila, de
-            // forma proporcional a lo que necesita cada una.
-            int totalNeeded = 0;
-            for (CrateEditorScreen.Tab tab : row) {
-                totalNeeded += this.tabMinWidth(tab);
-            }
-            int slack = Math.max(0, available - TAB_GAP * (count - 1) - totalNeeded);
-
-            int x = this.leftPos + 8;
+            // Ancho igual para todas: no hay botones gigantes ni enanos.
+            int width = (available - TAB_GAP * (count - 1)) / count;
             int y = this.topPos + 24 + r * TAB_ROW_HEIGHT;
 
             for (int i = 0; i < count; i++) {
                 CrateEditorScreen.Tab tab = row.get(i);
-                int width = this.tabMinWidth(tab) + (totalNeeded > 0 ? slack * this.tabMinWidth(tab) / totalNeeded : 0);
-                if (i == count - 1) {
-                    // La ultima cuadra hasta el borde para que no queden huecos raros.
-                    width = Math.max(width, this.leftPos + 8 + available - x);
+                int x = this.leftPos + 8 + i * (width + TAB_GAP);
+                boolean active = tab == this.activeTab;
+
+                // El texto se recorta al ancho del boton: nunca se sale.
+                String label = tab.label;
+                int room = width - 6;
+                if (this.font.width(label) > room) {
+                    label = this.font.plainSubstrByWidth(label, Math.max(4, room));
                 }
 
-                boolean active = tab == this.activeTab;
-                String text = (active ? "\u00a7f\u00a7l" : "\u00a77") + tab.label;
-                int buttonX = x;
+                String text = (active ? "\u00a7f\u00a7l" : "\u00a77") + label;
                 this.addRenderableWidget(Button.builder(Component.literal(text), b -> {
                     this.activeTab = tab;
                     this.rebuildWidgets();
-                }).bounds(buttonX, y, width, 18).build());
-                x += width + TAB_GAP;
+                }).bounds(x, y, width, 18).build());
             }
         }
     }
@@ -1458,9 +1564,16 @@ public class CrateEditorScreen extends Screen {
         int x = this.bodyX();
         int y = this.bodyY();
         int w = this.bodyW();
-        int listH = Math.max(40, this.bodyH() - 74);
+        int bottom = this.bodyY() + this.bodyH();
 
         this.addLabel("\u00a7e\u2726 " + title + " \u00a77(" + urls.size() + ")", x, y, tooltip);
+
+        // Igual que en Mensajes: las filas de abajo se anclan al borde inferior y
+        // la lista se queda con el espacio que sobre, para que nada se solape.
+        int selectedLabelY = bottom - 8;
+        int actionsY = selectedLabelY - 20;
+        int fieldY = actionsY - 20;
+        int listH = Math.max(14, fieldY - 4 - (y + 12));
 
         // Sin icono: las URLs se alinean a la izquierda y se aprovecha el ancho.
         ScrollSelector<String> list = new ScrollSelector<>(
@@ -1469,8 +1582,6 @@ public class CrateEditorScreen extends Screen {
         list.setItems(new ArrayList<>(urls));
         list.onSelect(url -> this.selectedMediaUrl = url);
         this.addRenderableWidget(list);
-
-        int fieldY = y + 12 + listH + 4;
         EditBox input = new EditBox(this.font, x, fieldY, w - 96, 16, Component.empty());
         input.setMaxLength(512);
         input.setHint(Component.literal("\u00a78https://... (link directo)"));
@@ -1493,7 +1604,6 @@ public class CrateEditorScreen extends Screen {
             this.rebuildWidgets();
         }).bounds(x + w - 92, fieldY, 92, 16).build());
 
-        int actionsY = fieldY + 20;
         int half = (w - 4) / 2;
 
         this.addRenderableWidget(

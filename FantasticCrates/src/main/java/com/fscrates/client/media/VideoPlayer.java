@@ -81,6 +81,8 @@ public final class VideoPlayer implements AutoCloseable {
     private volatile boolean failed;
     /** Buffer de trabajo de la conversion. Solo lo toca el hilo decodificador. */
     private int[] scratch;
+    /** Decodificador multihilo, si el archivo lo permite. */
+    private volatile GopDecoder gopDecoder;
 
     private VideoTexture texture;
     private ResourceLocation textureId;
@@ -156,7 +158,17 @@ public final class VideoPlayer implements AutoCloseable {
             return;
         }
 
-        this.decoderThread = new Thread(this.staticImage ? this::runImage : this::runVideo, "FSCrates-VideoDecode");
+        Runnable task;
+        if (this.staticImage) {
+            task = this::runImage;
+        } else {
+            // Se intenta el decodificado en paralelo; si el archivo no lo permite
+            // se usa un solo hilo, como siempre.
+            GopDecoder parallel = GopDecoder.tryCreate(this.file);
+            task = parallel != null ? () -> this.runParallelVideo(parallel) : this::runVideo;
+        }
+
+        this.decoderThread = new Thread(task, "FSCrates-VideoDecode");
         this.decoderThread.setDaemon(true);
         this.decoderThread.setPriority(Thread.NORM_PRIORITY - 1);
         this.decoderThread.start();
@@ -304,6 +316,56 @@ public final class VideoPlayer implements AutoCloseable {
 
     // ----------------------------------------------------------- decodificado
 
+    /**
+     * Decodificado en paralelo por GOPs. Es bastante mas rapido que un solo hilo
+     * (JCodec decodifica con uno solo), que es lo que permite 1080p a 30 fps.
+     */
+    private void runParallelVideo(GopDecoder decoder) {
+        this.gopDecoder = decoder;
+        try {
+            decoder.start();
+
+            while (!this.stopped) {
+                GopDecoder.YuvFrame frame = decoder.take();
+                if (frame == null) {
+                    Throwable failure = decoder.failure();
+                    if (failure != null) {
+                        throw failure;
+                    }
+                    return;
+                }
+
+                RgbaFrame out = this.convertShared(
+                    frame.luma, frame.cb, frame.cr, frame.width, frame.height, frame.chromaWidth,
+                    frame.timestamp, frame.duration
+                );
+                decoder.recycle(frame);
+
+                boolean queued = false;
+                while (!this.stopped && !queued) {
+                    queued = this.ready.offer(out, 100, TimeUnit.MILLISECONDS);
+                }
+                if (!queued) {
+                    MemoryUtil.memFree(out.pixels());
+                    return;
+                }
+            }
+        } catch (InterruptedException e) {
+            // cierre normal
+        } catch (Throwable t) {
+            FSCrates.LOGGER.error(
+                "[FSCrates] Fallo el decodificado en paralelo de '{}': {}. Se reintenta con un solo hilo.",
+                this.file.getFileName(),
+                t.toString()
+            );
+            decoder.close();
+            this.gopDecoder = null;
+            if (!this.stopped) {
+                this.runVideo();
+            }
+        }
+    }
+
     private void runVideo() {
         while (!this.stopped) {
             FrameGrab grab = null;
@@ -420,8 +482,23 @@ public final class VideoPlayer implements AutoCloseable {
     }
 
     private RgbaFrame convert(YuvFrame frame) {
-        int w = frame.width;
-        int h = frame.height;
+        return this.convertShared(
+            frame.luma, frame.cb, frame.cr, frame.width, frame.height, frame.chromaWidth,
+            frame.timestamp, frame.duration
+        );
+    }
+
+    /** Conversion YUV 4:2:0 -> RGBA, compartida por los dos caminos de decodificado. */
+    private RgbaFrame convertShared(
+        byte[] luma,
+        byte[] cb,
+        byte[] cr,
+        int w,
+        int h,
+        int cw,
+        double timestamp,
+        double duration
+    ) {
         int needed = w * h * 4;
 
         RgbaFrame reuse = this.recycled.poll();
@@ -439,10 +516,6 @@ public final class VideoPlayer implements AutoCloseable {
             this.scratch = new int[w * h];
         }
         int[] scratch = this.scratch;
-        byte[] luma = frame.luma;
-        byte[] cb = frame.cb;
-        byte[] cr = frame.cr;
-        int cw = frame.chromaWidth;
 
         Runnable job = () -> IntStream.range(0, h).parallel().forEach(y -> {
             int lumaRow = y * w;
@@ -473,7 +546,7 @@ public final class VideoPlayer implements AutoCloseable {
         buffer.clear();
         buffer.asIntBuffer().put(scratch, 0, w * h);
 
-        return new RgbaFrame(buffer, w, h, frame.timestamp, frame.duration);
+        return new RgbaFrame(buffer, w, h, timestamp, duration);
     }
 
     private void runImage() {
@@ -556,6 +629,12 @@ public final class VideoPlayer implements AutoCloseable {
     @Override
     public void close() {
         this.stopped = true;
+
+        GopDecoder decoder = this.gopDecoder;
+        if (decoder != null) {
+            decoder.close();
+            this.gopDecoder = null;
+        }
 
         Thread thread = this.decoderThread;
         if (thread != null) {

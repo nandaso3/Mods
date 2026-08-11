@@ -10,6 +10,7 @@ import net.minecraft.nbt.StringTag;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Component.Serializer;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.enchantment.EnchantmentHelper;
 import net.minecraft.world.item.enchantment.Enchantments;
@@ -135,6 +136,65 @@ public final class CrateItems {
 
     public static Rarity rarity(ItemStack stack) {
         return stack != null && stack.hasTag() ? Rarity.byName(stack.getTag().getCompound("fscrates").getString("rarity")) : Rarity.COMMON;
+    }
+
+    /**
+     * Busca en TODO el inventario del jugador una llave que sirva para esta caja.
+     *
+     * Vale la Fantastic Key universal (abre cualquier caja) o, si la caja tiene
+     * llave unica, la llave concreta de esa caja. Se mira el inventario entero y
+     * no solo la mano, porque la caja se abre desde el boton de la pantalla de
+     * pre-apertura y ahi el jugador no tiene por que llevarla en la mano.
+     *
+     * @return el ItemStack encontrado (el de verdad, para poder gastarlo) o EMPTY
+     */
+    public static ItemStack findUsableKey(Player player, CrateConfig crate) {
+        if (player == null || crate == null) {
+            return ItemStack.EMPTY;
+        }
+
+        // La mano primero, para gastar la que el jugador tiene a la vista.
+        ItemStack mainHand = player.getMainHandItem();
+        if (keyOpens(crate, mainHand)) {
+            return mainHand;
+        }
+
+        for (ItemStack stack : player.getInventory().items) {
+            if (keyOpens(crate, stack)) {
+                return stack;
+            }
+        }
+        ItemStack offhand = player.getOffhandItem();
+        if (keyOpens(crate, offhand)) {
+            return offhand;
+        }
+
+        return ItemStack.EMPTY;
+    }
+
+    /** true si esta llave abre esta caja. */
+    public static boolean keyOpens(CrateConfig crate, ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        // La universal abre todo.
+        if (isKey(stack)) {
+            return true;
+        }
+        // Si no, hace falta la llave unica de esta caja concreta.
+        return crate != null && crate.uniqueKeyEnabled && uniqueKeyMatches(crate, stack);
+    }
+
+    /** Nombre de la llave que hace falta, para el mensaje al jugador. */
+    public static String requiredKeyName(CrateConfig crate) {
+        if (crate != null && crate.uniqueKeyEnabled) {
+            String name = crate.uniqueKeyName;
+            if (name != null && !name.isBlank()) {
+                return name;
+            }
+            return "la llave de esta caja";
+        }
+        return "\u00a7d\u2726 Fantastic Key \u2726";
     }
 
     public static CrateConfig readConfig(ItemStack stack) {

@@ -5,6 +5,7 @@ import com.fscrates.crate.CrateOpeningService;
 import com.fscrates.item.CrateItems;
 import com.fscrates.network.FSNetwork;
 import com.fscrates.network.OpenEditorPacket;
+import com.fscrates.network.OpenPreviewPacket;
 import com.fscrates.registry.ModRegistry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -112,23 +113,11 @@ public class CrateBlock extends BaseEntityBlock {
                     return InteractionResult.CONSUME;
                 }
             } else {
-                ItemStack key = player.getMainHandItem();
-                boolean canOpen = CrateItems.isKey(key) || crate.uniqueKeyEnabled && CrateItems.uniqueKeyMatches(crate, key);
-                if (!canOpen) {
-                    if (CrateItems.isUniqueKey(key)) {
-                        serverPlayer.sendSystemMessage(Component.literal("\u00a7cNo puedes abrir esta crate con esta llave."));
-                    } else {
-                        serverPlayer.sendSystemMessage(
-                            Component.literal("\u00a7eNecesitas una \u00a7d\u2726 Fantastic Key \u2726\u00a7e en la mano para abrir esta crate.")
-                        );
-                    }
-
-                    return InteractionResult.CONSUME;
-                } else {
-                    boolean skip = crate.allowSkip && player.isShiftKeyDown();
-                    CrateOpeningService.open(serverPlayer, crate, pos, key, skip);
-                    return InteractionResult.CONSUME;
-                }
+                // La pantalla de pre-apertura se abre SIN pedir llave: se puede
+                // mirar la escena y el pool de recompensas siempre. La llave se
+                // comprueba al pulsar ABRIR (ver RequestOpenPacket).
+                FSNetwork.sendToClient(serverPlayer, new OpenPreviewPacket(crate.save(), pos));
+                return InteractionResult.CONSUME;
             }
         }
     }

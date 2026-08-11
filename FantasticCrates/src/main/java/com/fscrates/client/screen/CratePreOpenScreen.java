@@ -1,9 +1,15 @@
 package com.fscrates.client.screen;
 
+import com.fscrates.client.color.FSText;
 import com.fscrates.client.media.CrateMedia;
 import com.fscrates.client.widget.FSButton;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.crate.LootEngine;
+import com.fscrates.item.CrateItems;
+import com.fscrates.network.FSNetwork;
+import com.fscrates.network.RequestOpenPacket;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.item.ItemStack;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
@@ -34,27 +40,43 @@ public class CratePreOpenScreen extends Screen {
 
     /** Control de audio: un cuadradito y nada mas. */
     private static final int AUDIO_SIZE = 14;
-    /** Duracion del fundido de entrada, en milisegundos. */
-    private static final float FADE_IN_MS = 320.0F;
-    /** Duracion del oscurecimiento tipo revelacion antes de la cinematica. */
-    private static final float FADE_OUT_MS = 1150.0F;
+    /**
+     * Fundido de entrada: la escena aparece desde negro al hacer click en la caja,
+     * en vez de saltar de golpe.
+     */
+    private static final float FADE_IN_MS = 900.0F;
 
     private final CrateConfig config;
-    private final Runnable openAction;
+    private final BlockPos pos;
 
     private boolean handedOff;
     private long openedAt;
-    /** Momento en que se pulso ABRIR; 0 = todavia no. */
-    private long fadeOutStartedAt;
 
     private int audioX;
     private int audioY;
 
-    public CratePreOpenScreen(CrateConfig config, Runnable openAction) {
+    /** Embed de confirmacion "¿consumir 1 llave?" visible. */
+    private boolean confirming;
+    private int confirmAcceptX;
+    private int confirmRejectX;
+    private int confirmButtonY;
+    private int confirmButtonW;
+    /** Aviso temporal (por ejemplo, que falta la llave). */
+    private String notice = "";
+    private long noticeUntil;
+
+    public CratePreOpenScreen(CrateConfig config, BlockPos pos) {
         super(Component.literal("Pre-apertura"));
         this.config = config == null ? new CrateConfig() : config;
-        this.openAction = openAction;
+        this.pos = pos;
         loadVolumeState();
+    }
+
+    /** La llave que serviria para esta caja, o EMPTY si no hay ninguna. */
+    private ItemStack usableKey() {
+        return this.minecraft == null || this.minecraft.player == null
+            ? ItemStack.EMPTY
+            : CrateItems.findUsableKey(this.minecraft.player, this.config);
     }
 
     @Override
@@ -87,7 +109,7 @@ public class CratePreOpenScreen extends Screen {
                 20,
                 Component.literal("ABRIR"),
                 FSGui.ACCENT_GREEN,
-                this::proceed
+                this::onOpenPressed
             )
         );
 
@@ -111,24 +133,46 @@ public class CratePreOpenScreen extends Screen {
         this.audioY = 8;
     }
 
-    /** Arranca el fundido a negro; la cinematica se abre al terminar. */
-    private void proceed() {
-        if (this.handedOff || this.fadeOutStartedAt != 0L) {
+    /**
+     * ABRIR: comprueba que haya llave y pide confirmacion antes de gastarla.
+     * Si no hay llave no deja seguir.
+     */
+    private void onOpenPressed() {
+        if (this.handedOff) {
             return;
         }
-        this.fadeOutStartedAt = System.currentTimeMillis();
+
+        if (this.usableKey().isEmpty()) {
+            this.notice = "\u00a7cNecesitas \u00a7f" + CrateItems.requiredKeyName(this.config) + "\u00a7c en el inventario.";
+            this.noticeUntil = System.currentTimeMillis() + 3500L;
+            this.confirming = false;
+            return;
+        }
+
+        // Si la caja no gasta llave, no hay nada que confirmar.
+        if (!this.config.consumeKey) {
+            this.requestOpen();
+            return;
+        }
+
+        this.confirming = true;
     }
 
-    /** Salto de verdad a la cinematica, ya con la pantalla en negro. */
-    private void handOff() {
+    /** Pide al servidor abrir de verdad. El servidor vuelve a validar todo. */
+    private void requestOpen() {
         if (this.handedOff) {
             return;
         }
         this.handedOff = true;
+        this.confirming = false;
+
+        boolean skip = this.config.allowSkip && this.minecraft != null && this.minecraft.player != null
+            && this.minecraft.player.isShiftKeyDown();
+
         CrateMedia.stop();
-        if (this.openAction != null) {
-            this.openAction.run();
-        } else if (this.minecraft != null) {
+        FSNetwork.sendToServer(new RequestOpenPacket(this.pos, skip));
+        // La cinematica llegara desde el servidor (PlayAnimationPacket).
+        if (this.minecraft != null) {
             this.minecraft.setScreen(null);
         }
     }
@@ -151,47 +195,110 @@ public class CratePreOpenScreen extends Screen {
             this.renderLoadingOverlay(g);
         }
 
+        this.renderKeyStatus(g);
+
         super.render(g, mouseX, mouseY, partialTick);
 
+        if (this.confirming) {
+            this.renderConfirm(g, mouseX, mouseY);
+        }
+        this.renderNotice(g);
         this.renderTransitions(g);
     }
 
+    /** Indicador discreto de la llave, encima de los botones. */
+    private void renderKeyStatus(GuiGraphics g) {
+        ItemStack key = this.usableKey();
+        String text = key.isEmpty()
+            ? "\u00a7c\u2715 Te falta " + CrateItems.requiredKeyName(this.config)
+            : "\u00a7a\u2714 \u00a77Llave lista" + (this.config.consumeKey ? " \u00a78(se gastar\u00e1 1)" : "");
+        g.drawCenteredString(this.font, text, this.width / 2, this.height - 58, 0xFFFFFFFF);
+    }
+
+    /** Embed sutil de confirmacion: "¿consumir 1 llave?" */
+    private void renderConfirm(GuiGraphics g, int mouseX, int mouseY) {
+        int boxW = Math.min(this.width - 40, 226);
+        int boxH = 62;
+        int x = (this.width - boxW) / 2;
+        int y = (this.height - boxH) / 2;
+
+        // Oscurece un poco el resto sin tapar la escena del todo.
+        g.fill(0, 0, this.width, this.height, 0x66000000);
+        FSGui.panel(g, x, y, boxW, boxH);
+
+        g.drawCenteredString(this.font, "\u00a7f\u00bfConsumir 1 llave?", x + boxW / 2, y + 10, 0xFFFFFFFF);
+        ItemStack key = this.usableKey();
+        String keyName = key.isEmpty() ? "-" : key.getHoverName().getString();
+        g.drawCenteredString(
+            this.font,
+            "\u00a77" + this.font.plainSubstrByWidth(keyName, boxW - 20),
+            x + boxW / 2,
+            y + 23,
+            0xFFAAAAAA
+        );
+
+        int bw = (boxW - 30) / 2;
+        int by = y + boxH - 26;
+        this.confirmAcceptX = x + 10;
+        this.confirmRejectX = x + 20 + bw;
+        this.confirmButtonY = by;
+        this.confirmButtonW = bw;
+
+        drawMiniButton(g, this.font, this.confirmAcceptX, by, bw, "Aceptar", FSGui.ACCENT_GREEN, mouseX, mouseY);
+        drawMiniButton(g, this.font, this.confirmRejectX, by, bw, "Rechazar", FSGui.ACCENT_RED, mouseX, mouseY);
+    }
+
+    private static void drawMiniButton(
+        GuiGraphics g,
+        net.minecraft.client.gui.Font font,
+        int x,
+        int y,
+        int w,
+        String label,
+        int accent,
+        int mouseX,
+        int mouseY
+    ) {
+        int h = 18;
+        boolean hovered = mouseX >= x && mouseX < x + w && mouseY >= y && mouseY < y + h;
+        g.fill(x, y, x + w, y + h, 0xFF000000);
+        g.fill(x + 1, y + 1, x + w - 1, y + h - 1, hovered ? 0xFF9098A6 : 0xFF6E6E6E);
+        g.fill(x + 1, y + 1, x + w - 1, y + 2, hovered ? 0xFFB6BECB : 0xFF8C8C8C);
+        g.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, 0xFF3F3F3F);
+        if (hovered) {
+            g.fill(x + 1, y + h - 1, x + w - 1, y + h, accent);
+        }
+        g.drawCenteredString(font, label, x + w / 2, y + (h - font.lineHeight) / 2 + 1, 0xFFFFFFFF);
+    }
+
+    /** Aviso temporal en la parte de abajo. */
+    private void renderNotice(GuiGraphics g) {
+        if (this.notice.isEmpty() || System.currentTimeMillis() > this.noticeUntil) {
+            return;
+        }
+        int textWidth = this.font.width(this.notice);
+        int x = (this.width - textWidth) / 2;
+        int y = this.height - 74;
+        g.fill(x - 6, y - 4, x + textWidth + 6, y + 12, 0xB0000000);
+        g.drawString(this.font, this.notice, x, y, 0xFFFFFFFF, false);
+    }
+
     /**
-     * Fundido de entrada al abrir y fundido a negro al pulsar ABRIR, para que la
-     * cinematica no aparezca de golpe.
+     * Fundido de entrada: al hacer click en la caja la escena se revela desde
+     * negro poco a poco, en vez de aparecer de golpe.
      */
     private void renderTransitions(GuiGraphics g) {
-        long now = System.currentTimeMillis();
-
-        if (this.fadeOutStartedAt != 0L) {
-            float progress = Math.min(1.0F, (now - this.fadeOutStartedAt) / FADE_OUT_MS);
-
-            // Revelacion: primero se cierra un vinetado desde los bordes y al
-            // final se va a negro del todo. Asi no aparece la escena de golpe.
-            float vignette = Math.min(1.0F, progress / 0.75F);
-            int bandH = (int) (this.height * 0.55F * vignette);
-            int bandW = (int) (this.width * 0.55F * vignette);
-            g.fillGradient(0, 0, this.width, bandH, 0xFF000000, 0x00000000);
-            g.fillGradient(0, this.height - bandH, this.width, this.height, 0x00000000, 0xFF000000);
-            g.fillGradient(0, 0, bandW, this.height, 0xA0000000, 0x00000000);
-            g.fillGradient(this.width - bandW, 0, this.width, this.height, 0x00000000, 0xA0000000);
-
-            // Oscurecimiento global con curva suave (ease-in cubica).
-            float eased = progress * progress * progress;
-            int alpha = (int) (eased * 255.0F) & 0xFF;
-            g.fill(0, 0, this.width, this.height, alpha << 24);
-
-            if (progress >= 1.0F) {
-                this.handOff();
-            }
+        float elapsed = System.currentTimeMillis() - this.openedAt;
+        if (elapsed >= FADE_IN_MS) {
             return;
         }
 
-        float elapsed = now - this.openedAt;
-        if (elapsed < FADE_IN_MS) {
-            int alpha = (int) ((1.0F - elapsed / FADE_IN_MS) * 255.0F) & 0xFF;
-            g.fill(0, 0, this.width, this.height, alpha << 24);
-        }
+        float progress = elapsed / FADE_IN_MS;
+        // Ease-out cubica: arranca oscuro y va aclarando cada vez mas despacio.
+        float remaining = 1.0F - progress;
+        float eased = remaining * remaining * remaining;
+        int alpha = (int) (eased * 255.0F) & 0xFF;
+        g.fill(0, 0, this.width, this.height, alpha << 24);
     }
 
     /**
@@ -202,33 +309,38 @@ public class CratePreOpenScreen extends Screen {
     private void renderTexts(GuiGraphics g) {
         int centerX = this.width / 2;
         int y = 12;
+        long now = System.currentTimeMillis();
 
-        String header = LootEngine.colorize(this.config.sceneHeader == null ? "" : this.config.sceneHeader);
-        if (!header.isBlank()) {
-            g.drawCenteredString(this.font, header, centerX, y, 0xFFB0B6C2);
-            y += 12;
-        }
-
-        String name = LootEngine.colorize(this.config.displayName == null ? "" : this.config.displayName);
-        if (!name.isBlank()) {
-            g.drawCenteredString(this.font, name, centerX, y, 0xFFFFFFFF);
-            y += 13;
-        }
-
-        String subtitle = LootEngine.colorize(this.config.sceneSubtitle == null ? "" : this.config.sceneSubtitle);
-        if (!subtitle.isBlank()) {
-            g.drawCenteredString(this.font, subtitle, centerX, y, 0xFFAAAAAA);
-            y += 11;
-        }
+        y = this.drawSceneLine(g, this.config.sceneHeader, centerX, y, 0xFFB0B6C2, now, 12);
+        y = this.drawSceneLine(g, this.config.displayName, centerX, y, 0xFFFFFFFF, now, 13);
+        y = this.drawSceneLine(g, this.config.sceneSubtitle, centerX, y, 0xFFAAAAAA, now, 11);
 
         for (String raw : this.config.sceneLines) {
             if (raw == null || raw.isBlank()) {
                 y += 5;
                 continue;
             }
-            g.drawCenteredString(this.font, LootEngine.colorize(raw), centerX, y, 0xFFAAAAAA);
-            y += 10;
+            y = this.drawSceneLine(g, raw, centerX, y, 0xFFAAAAAA, now, 10);
         }
+    }
+
+    /**
+     * Dibuja una linea de la escena. Si lleva efectos (arcoiris, degradado o
+     * color hexadecimal) se pasa por FSText, que colorea letra a letra; si no, se
+     * dibuja como texto normal, que es mas barato.
+     */
+    private int drawSceneLine(GuiGraphics g, String raw, int centerX, int y, int color, long now, int advance) {
+        if (raw == null || raw.isBlank()) {
+            return y;
+        }
+
+        if (FSText.hasEffects(raw)) {
+            Component component = FSText.parse(raw, now);
+            g.drawCenteredString(this.font, component, centerX, y, color);
+        } else {
+            g.drawCenteredString(this.font, LootEngine.colorize(raw), centerX, y, color);
+        }
+        return y + advance;
     }
 
     /**
@@ -310,6 +422,21 @@ public class CratePreOpenScreen extends Screen {
 
     @Override
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        // El embed de confirmacion se come los clicks mientras esta abierto.
+        if (this.confirming) {
+            if (button == 0 && mouseY >= this.confirmButtonY && mouseY < this.confirmButtonY + 18) {
+                if (mouseX >= this.confirmAcceptX && mouseX < this.confirmAcceptX + this.confirmButtonW) {
+                    this.requestOpen();
+                    return true;
+                }
+                if (mouseX >= this.confirmRejectX && mouseX < this.confirmRejectX + this.confirmButtonW) {
+                    this.confirming = false;
+                    return true;
+                }
+            }
+            return true;
+        }
+
         if (button == 0 && this.isOverAudio(mouseX, mouseY)) {
             muted = !muted;
             applyVolume();
@@ -333,6 +460,12 @@ public class CratePreOpenScreen extends Screen {
 
     @Override
     public void onClose() {
+        // Con el embed abierto, ESC solo cancela la confirmacion.
+        if (this.confirming) {
+            this.confirming = false;
+            return;
+        }
+
         // ESC solo sale: la caja se abre unicamente con el boton ABRIR.
         CrateMedia.stop();
         if (this.minecraft != null) {
