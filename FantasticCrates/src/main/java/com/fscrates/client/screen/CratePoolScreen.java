@@ -5,6 +5,7 @@ import com.fscrates.client.widget.FSButton;
 import com.fscrates.client.widget.ScrollbarDrag;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
+import com.fscrates.item.CrateItems;
 import com.fscrates.config.RewardEntry;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -12,7 +13,10 @@ import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.util.FormattedCharSequence;
+import net.minecraft.world.item.TooltipFlag;
 import net.minecraft.world.item.ItemStack;
 
 /**
@@ -40,6 +44,46 @@ public class CratePoolScreen extends Screen {
     private int panelHeight;
 
     private record Row(ItemStack icon, String name, String rarity, int rarityColor, String odds) {
+    }
+
+    /**
+     * Item cuyos detalles se estan mostrando al lado, o vacio si ninguno.
+     *
+     * Se decide en cada dibujado: se pone al pasar por encima de una fila que tenga
+     * algo que contar y se limpia al principio de cada fotograma.
+     */
+    private ItemStack detailStack = ItemStack.EMPTY;
+
+    /**
+     * true si este item tiene algo que merezca la pena mostrar aparte.
+     *
+     * Las llaves quedan fuera a proposito: llevan NBT propio del mod (a que caja
+     * pertenecen, que modelo usan) que no le dice nada al jugador, y sacar una
+     * ventana por cada llave de la lista seria justo el estorbo que no se quiere.
+     * Las cajas tampoco, por lo mismo.
+     */
+    private static boolean hasDetails(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) {
+            return false;
+        }
+        if (CrateItems.isKey(stack) || CrateItems.isUniqueKey(stack) || CrateItems.isCrate(stack)) {
+            return false;
+        }
+        if (stack.isEnchanted()) {
+            return true;
+        }
+
+        CompoundTag tag = stack.getTag();
+        if (tag == null) {
+            return false;
+        }
+        // Encantamientos guardados (libros), modificadores de atributo, efectos de
+        // pocion y lore puesto a mano.
+        return tag.contains("StoredEnchantments")
+            || tag.contains("AttributeModifiers")
+            || tag.contains("CustomPotionEffects")
+            || tag.contains("Potion")
+            || tag.getCompound("display").contains("Lore");
     }
 
     public CratePoolScreen(CrateConfig config, Screen parent) {
@@ -170,8 +214,75 @@ public class CratePoolScreen extends Screen {
         // dos lineas pisandose.
         this.fadeLine(g, this.leftPos + 8, this.topPos + 20, this.panelWidth - 16);
 
+        // Se decide en cada fotograma: lo pone renderRows si el raton esta sobre una
+        // fila con algo que contar.
+        this.detailStack = ItemStack.EMPTY;
         this.renderRows(g, mouseX, mouseY);
+        this.renderDetails(g);
         super.render(g, mouseX, mouseY, partialTick);
+    }
+
+    /**
+     * Ventana con los encantamientos, atributos y lore del item señalado.
+     *
+     * Va AL LADO de la lista y centrada en vertical, no pegada al raton como un
+     * tooltip normal. Asi no tapa la fila que estas mirando ni se mueve mientras
+     * recorres la lista: aparece siempre en el mismo sitio y se lee de un vistazo.
+     *
+     * El contenido se pide al propio item, o sea que sale igual que en el inventario
+     * (encantamientos traducidos, modificadores, efectos, lore) y sin tener que
+     * interpretar el NBT a mano aqui.
+     */
+    private void renderDetails(GuiGraphics g) {
+        ItemStack stack = this.detailStack;
+        if (stack == null || stack.isEmpty() || this.minecraft == null) {
+            return;
+        }
+
+        List<Component> raw = stack.getTooltipLines(this.minecraft.player, TooltipFlag.Default.NORMAL);
+        if (raw.isEmpty()) {
+            return;
+        }
+
+        // Se parten las lineas largas para que la ventana no crezca a lo ancho.
+        int maxText = 150;
+        List<FormattedCharSequence> lines = new ArrayList<>();
+        int textWidth = 0;
+        for (Component line : raw) {
+            for (FormattedCharSequence part : this.font.split(line, maxText)) {
+                lines.add(part);
+                textWidth = Math.max(textWidth, this.font.width(part));
+            }
+        }
+        if (lines.isEmpty()) {
+            return;
+        }
+
+        int padding = 8;
+        int boxWidth = textWidth + padding * 2;
+        int boxHeight = lines.size() * (this.font.lineHeight + 1) + padding * 2 - 1;
+
+        // A la derecha de la lista si cabe; si no, a la izquierda. Y si tampoco,
+        // pegada al borde sin salirse.
+        int gap = 6;
+        int x = this.leftPos + this.panelWidth + gap;
+        if (x + boxWidth > this.width - 4) {
+            x = this.leftPos - gap - boxWidth;
+        }
+        x = Math.max(4, Math.min(x, this.width - boxWidth - 4));
+
+        // Centrada respecto a la ventana de recompensas, no respecto a la pantalla:
+        // asi las dos quedan alineadas entre si.
+        int y = this.topPos + (this.panelHeight - boxHeight) / 2;
+        y = Math.max(4, Math.min(y, this.height - boxHeight - 4));
+
+        FSGui.panel(g, x, y, boxWidth, boxHeight);
+
+        int textY = y + padding;
+        for (FormattedCharSequence line : lines) {
+            g.drawString(this.font, line, x + padding, textY, 0xFFE6E6E6);
+            textY += this.font.lineHeight + 1;
+        }
     }
 
     /**
@@ -232,6 +343,9 @@ public class CratePoolScreen extends Screen {
             int textY = rowY + (ROW_HEIGHT - 8) / 2;
 
             boolean hovered = mouseX >= rowsLeft && mouseX < rowsLeft + rowsWide && mouseY >= rowY && mouseY < rowY + ROW_HEIGHT;
+            if (hovered && hasDetails(row.icon())) {
+                this.detailStack = row.icon();
+            }
             if (hovered) {
                 // La fila señalada se ACLARA en vez de oscurecerse, y el brillo se
                 // apaga hacia la derecha. Oscurecerla, que es lo que se hacia
