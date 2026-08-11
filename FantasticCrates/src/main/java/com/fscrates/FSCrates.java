@@ -4,6 +4,7 @@ import com.fscrates.client.ClientSetup;
 import com.fscrates.command.FSCrateCommand;
 import com.fscrates.config.ItemReferenceGenerator;
 import com.fscrates.config.MediaGuide;
+import com.fscrates.network.ModRequirement;
 import com.fscrates.config.JsonCrateLoader;
 import com.fscrates.network.FSNetwork;
 import com.fscrates.registry.ModRegistry;
@@ -30,6 +31,10 @@ public class FSCrates {
         modBus.addListener(this::clientSetup);
         MinecraftForge.EVENT_BUS.addListener(this::registerCommands);
         MinecraftForge.EVENT_BUS.addListener(this::onServerStarted);
+
+        // Sin el mod en el cliente no se entra. Va por su cuenta y no depende del
+        // apreton de manos de Forge, que los servidores hibridos relajan.
+        MinecraftForge.EVENT_BUS.addListener(ModRequirement::onNegotiation);
         LOGGER.info("[FSCrates] Initializing Fantastic Crates");
     }
 
