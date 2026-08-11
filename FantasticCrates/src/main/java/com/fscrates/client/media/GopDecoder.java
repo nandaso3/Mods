@@ -72,6 +72,8 @@ final class GopDecoder implements AutoCloseable {
     private Thread[] workers;
     /** Hilos que ya acabaron su parte, para saber si queda algo por llegar. */
     private int finishedWorkers;
+    /** Momento del arranque, para ir soltando la ventana poco a poco. */
+    private volatile long startedAtMs = System.currentTimeMillis();
 
     private GopDecoder(Path file, int workerCount, int[] keyFrames, int totalFrames) {
         this.file = file;
@@ -159,7 +161,24 @@ final class GopDecoder implements AutoCloseable {
         }
     }
 
+    /**
+     * Ventana que se permite en este momento.
+     *
+     * Arranca pequena y crece durante el primer segundo. Si se permitiera la
+     * ventana entera desde el principio, al abrir la pantalla los hilos
+     * decodificaban 22 fotogramas de golpe a toda velocidad: un pico de CPU justo
+     * en el peor momento, que es el tiron que se notaba la primera vez.
+     */
+    private int effectiveWindow() {
+        long elapsed = System.currentTimeMillis() - this.startedAtMs;
+        if (elapsed >= 1200L) {
+            return this.window;
+        }
+        return Math.max(3, Math.min(this.window, (int) (3 + elapsed / 60L)));
+    }
+
     void start() {
+        this.startedAtMs = System.currentTimeMillis();
         this.workers = new Thread[this.workerCount];
         for (int i = 0; i < this.workerCount; i++) {
             Thread t = new Thread(this::runWorker, "FSCrates-VideoDecode-" + i);
@@ -206,7 +225,7 @@ final class GopDecoder implements AutoCloseable {
 
                 // No adelantarse mas de la ventana: acota la memoria.
                 synchronized (this.lock) {
-                    while (!this.stopped && from > this.nextToEmit + this.window) {
+                    while (!this.stopped && from > this.nextToEmit + this.effectiveWindow()) {
                         this.lock.wait(50L);
                     }
                     if (this.stopped) {
@@ -291,7 +310,7 @@ final class GopDecoder implements AutoCloseable {
             // que tenia justo el fotograma que toca entregar se quedaba esperando
             // sitio, y take() esperaba ese fotograma para siempre.
             // El tamano de la cola ya queda acotado por esta misma condicion.
-            while (!this.stopped && index > this.nextToEmit + this.window) {
+            while (!this.stopped && index > this.nextToEmit + this.effectiveWindow()) {
                 this.lock.wait(50L);
             }
             if (this.stopped) {

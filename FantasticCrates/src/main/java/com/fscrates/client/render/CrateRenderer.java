@@ -4,6 +4,7 @@ import com.fscrates.animation.CrateAnimation;
 import com.fscrates.block.CrateBlock;
 import com.fscrates.block.CrateBlockEntity;
 import com.fscrates.client.color.FSText;
+import com.fscrates.client.color.FSTextStyle;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
 import com.fscrates.config.RewardEntry;
@@ -447,11 +448,16 @@ public class CrateRenderer implements BlockEntityRenderer<CrateBlockEntity> {
         if (!(be.getBlockPos().getCenter().distanceToSqr(camPos) > 576.0)) {
             ArrayList<MutableComponent> lines = new ArrayList<>();
             if (cfg.floatingName && cfg.displayName != null && !cfg.displayName.isEmpty()) {
-                // Con efectos (color hexadecimal, arcoiris o degradado) se colorea
-                // letra a letra; si no, se deja el camino de siempre para que el
-                // color de rareza siga aplicandose.
-                if (FSText.hasEffects(cfg.displayName)) {
-                    lines.add(FSText.parse(cfg.displayName, System.currentTimeMillis()));
+                // Si el nombre tiene estilo propio (color exacto, arcoiris o
+                // degradado) se pinta letra a letra; si no, se deja el camino de
+                // siempre para que el color de rareza siga aplicandose.
+                FSTextStyle nameStyle = cfg.nameStyle;
+                if (nameStyle != null && (nameStyle.rainbow || nameStyle.gradient || nameStyle.bold
+                    || nameStyle.italic || nameStyle.underline || nameStyle.strikethrough
+                    || !"#FFFFFF".equalsIgnoreCase(nameStyle.color))) {
+                    FSTextStyle styled = nameStyle.copy();
+                    styled.text = colorize(cfg.displayName);
+                    lines.add(styled.toComponent(System.currentTimeMillis()));
                 } else {
                     lines.add(Component.literal(colorize(cfg.displayName)).withStyle(rarity.color()));
                 }
@@ -459,11 +465,7 @@ public class CrateRenderer implements BlockEntityRenderer<CrateBlockEntity> {
 
             for (String string : cfg.floatingText) {
                 if (string != null && !string.isEmpty()) {
-                    lines.add(
-                        FSText.hasEffects(string)
-                            ? FSText.parse(string, System.currentTimeMillis())
-                            : Component.literal(colorize(string))
-                    );
+                    lines.add(Component.literal(colorize(string)));
                 }
             }
 

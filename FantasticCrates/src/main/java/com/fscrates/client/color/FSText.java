@@ -113,6 +113,12 @@ public final class FSText {
         return sb2.toString();
     }
 
+    /** Color RGB de un codigo clasico (0-9, a-f). */
+    public static int legacyColorOf(char code) {
+        int index = "0123456789abcdef".indexOf(Character.toLowerCase(code));
+        return index < 0 ? 0xFFFFFF : legacyColor(index);
+    }
+
     /** Codigo clasico (0-9, a-f) cuyo color esta mas cerca del RGB dado. */
     public static char nearestLegacyChar(int rgb) {
         int r = rgb >> 16 & 0xFF;

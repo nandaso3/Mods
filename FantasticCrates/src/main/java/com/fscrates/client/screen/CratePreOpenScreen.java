@@ -1,6 +1,7 @@
 package com.fscrates.client.screen;
 
 import com.fscrates.client.color.FSText;
+import com.fscrates.client.color.FSTextStyle;
 import com.fscrates.client.media.CrateMedia;
 import com.fscrates.client.widget.FSButton;
 import com.fscrates.config.CrateConfig;
@@ -301,35 +302,34 @@ public class CratePreOpenScreen extends Screen {
         int y = 12;
         long now = System.currentTimeMillis();
 
-        y = this.drawSceneLine(g, this.config.sceneHeader, centerX, y, 0xFFB0B6C2, now, 12);
-        y = this.drawSceneLine(g, this.config.displayName, centerX, y, 0xFFFFFFFF, now, 13);
-        y = this.drawSceneLine(g, this.config.sceneSubtitle, centerX, y, 0xFFAAAAAA, now, 11);
+        y = this.drawStyled(g, this.config.sceneHeader, centerX, y, now, 12);
 
-        for (String raw : this.config.sceneLines) {
-            if (raw == null || raw.isBlank()) {
+        // El nombre de la caja: el texto sale de displayName y el estilo de
+        // nameStyle, asi el campo del editor solo lleva texto.
+        FSTextStyle name = this.config.nameStyle == null ? new FSTextStyle() : this.config.nameStyle.copy();
+        name.text = LootEngine.colorize(this.config.displayName == null ? "" : this.config.displayName);
+        if (!name.isBlank()) {
+            g.drawCenteredString(this.font, name.toComponent(now), centerX, y, 0xFFFFFFFF);
+            y += 13;
+        }
+
+        y = this.drawStyled(g, this.config.sceneSubtitle, centerX, y, now, 11);
+
+        for (FSTextStyle line : this.config.sceneLines) {
+            if (line == null || line.isBlank()) {
                 y += 5;
                 continue;
             }
-            y = this.drawSceneLine(g, raw, centerX, y, 0xFFAAAAAA, now, 10);
+            y = this.drawStyled(g, line, centerX, y, now, 10);
         }
     }
 
-    /**
-     * Dibuja una linea de la escena. Si lleva efectos (arcoiris, degradado o
-     * color hexadecimal) se pasa por FSText, que colorea letra a letra; si no, se
-     * dibuja como texto normal, que es mas barato.
-     */
-    private int drawSceneLine(GuiGraphics g, String raw, int centerX, int y, int color, long now, int advance) {
-        if (raw == null || raw.isBlank()) {
+    /** Dibuja una linea de la escena con su estilo. */
+    private int drawStyled(GuiGraphics g, FSTextStyle style, int centerX, int y, long now, int advance) {
+        if (style == null || style.isBlank()) {
             return y;
         }
-
-        if (FSText.hasEffects(raw)) {
-            Component component = FSText.parse(raw, now);
-            g.drawCenteredString(this.font, component, centerX, y, color);
-        } else {
-            g.drawCenteredString(this.font, LootEngine.colorize(raw), centerX, y, color);
-        }
+        g.drawCenteredString(this.font, style.toComponent(now), centerX, y, 0xFFFFFFFF);
         return y + advance;
     }
 

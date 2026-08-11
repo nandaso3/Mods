@@ -32,7 +32,7 @@ public final class DefaultMedia {
     /** Musica por defecto. */
     private static final String MUSIC = "default_music.mp3";
     /** Imagen mostrada mientras el primer fotograma del video aun no esta listo. */
-    private static final String POSTER = "default_poster.png";
+    private static final String POSTER = "default_poster.jpg";
 
     private DefaultMedia() {
     }

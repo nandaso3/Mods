@@ -1,6 +1,7 @@
 package com.fscrates.config;
 
 import com.fscrates.FSCrates;
+import com.fscrates.client.color.FSTextStyle;
 import com.fscrates.crate.CrateRegistry;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -221,10 +222,26 @@ public final class JsonCrateLoader {
         config.music.addAll(strings(media, "musica"));
 
         JsonObject scene = section(json, "escena");
-        config.sceneHeader = string(scene, "lineaDeArriba", config.sceneHeader);
-        config.sceneSubtitle = string(scene, "lineaDeAbajo", config.sceneSubtitle);
+        config.sceneHeader = readStyle(scene, "lineaDeArriba", config.sceneHeader);
+        config.sceneSubtitle = readStyle(scene, "lineaDeAbajo", config.sceneSubtitle);
+        config.nameStyle = readStyle(scene, "estiloDelNombre", config.nameStyle);
+
         config.sceneLines.clear();
-        config.sceneLines.addAll(strings(scene, "mensajeExtra"));
+        if (scene.has("mensajeExtra") && scene.get("mensajeExtra").isJsonArray()) {
+            JsonArray array = scene.getAsJsonArray("mensajeExtra");
+            for (int i = 0; i < array.size(); i++) {
+                JsonElement element = array.get(i);
+                if (element.isJsonObject()) {
+                    config.sceneLines.add(FSTextStyle.fromJson(element.getAsJsonObject()));
+                } else {
+                    // Formato viejo: era una lista de cadenas con los codigos dentro.
+                    try {
+                        config.sceneLines.add(FSTextStyle.migrate(element.getAsString()));
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        }
 
         config.rewards.clear();
         if (json.has("recompensas") && json.get("recompensas").isJsonArray()) {
@@ -447,10 +464,13 @@ public final class JsonCrateLoader {
 
         // ---- escena de pre-apertura (textos)
         JsonObject scene = new JsonObject();
-        scene.addProperty("lineaDeArriba", config.sceneHeader == null ? "" : config.sceneHeader);
-        scene.addProperty("lineaDeAbajo", config.sceneSubtitle == null ? "" : config.sceneSubtitle);
+        scene.add("lineaDeArriba", (config.sceneHeader == null ? new FSTextStyle() : config.sceneHeader).toJson());
+        scene.add("lineaDeAbajo", (config.sceneSubtitle == null ? new FSTextStyle() : config.sceneSubtitle).toJson());
+        scene.add("estiloDelNombre", (config.nameStyle == null ? new FSTextStyle() : config.nameStyle).toJson());
         JsonArray sceneLines = new JsonArray();
-        config.sceneLines.forEach(sceneLines::add);
+        for (FSTextStyle line : config.sceneLines) {
+            sceneLines.add(line.toJson());
+        }
         scene.add("mensajeExtra", sceneLines);
         root.add("escena", scene);
 
@@ -561,6 +581,21 @@ public final class JsonCrateLoader {
      * Devuelve una seccion del JSON. Si no existe devuelve el propio objeto
      * padre, para que los archivos del formato plano antiguo sigan funcionando.
      */
+    /** Lee un texto con estilo; acepta tambien el formato viejo de cadena suelta. */
+    private static FSTextStyle readStyle(JsonObject json, String key, FSTextStyle fallback) {
+        if (json.has(key)) {
+            JsonElement element = json.get(key);
+            if (element.isJsonObject()) {
+                return FSTextStyle.fromJson(element.getAsJsonObject());
+            }
+            try {
+                return FSTextStyle.migrate(element.getAsString());
+            } catch (Exception ignored) {
+            }
+        }
+        return fallback == null ? new FSTextStyle() : fallback;
+    }
+
     private static JsonObject section(JsonObject json, String name) {
         if (json.has(name) && json.get(name).isJsonObject()) {
             return json.getAsJsonObject(name);

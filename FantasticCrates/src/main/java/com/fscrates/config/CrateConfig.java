@@ -1,6 +1,7 @@
 package com.fscrates.config;
 
 import com.fscrates.animation.AnimationRegistry;
+import com.fscrates.client.color.FSTextStyle;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,12 +29,20 @@ public class CrateConfig {
     public final List<String> videos = new ArrayList<>();
     /** URLs directas de musica para la pantalla de pre-apertura. */
     public final List<String> music = new ArrayList<>();
-    /** Linea que sale ENCIMA del nombre de la crate en la pre-apertura. */
-    public String sceneHeader = "\u00a7d\u2726 Fantastic Crates \u2726";
+    /**
+     * Textos de la pantalla de pre-apertura.
+     *
+     * El estilo (color, negrita, arcoiris...) va en campos aparte dentro de
+     * FSTextStyle, no metido en la cadena: asi el texto nunca sale con codigos a
+     * la vista.
+     */
+    public FSTextStyle sceneHeader = new FSTextStyle("\u2726 Fantastic Crates \u2726", "#FF55FF");
     /** Linea que sale DEBAJO del nombre de la crate. */
-    public String sceneSubtitle = "\u00a77Prep\u00e1rate para abrir tu caja";
+    public FSTextStyle sceneSubtitle = new FSTextStyle("Prep\u00e1rate para abrir tu caja", "#AAAAAA");
+    /** Estilo con el que se pinta el nombre de la caja en la escena. */
+    public FSTextStyle nameStyle = new FSTextStyle("", "#FFFFFF");
     /** Lineas extra de texto libre, debajo del subtitulo. */
-    public final List<String> sceneLines = new ArrayList<>();
+    public final List<FSTextStyle> sceneLines = new ArrayList<>();
     public final List<ParticleLayer> particleLayers = new ArrayList<>();
     public boolean consumeKey = true;
     public boolean uniqueKeyEnabled = false;
@@ -191,15 +200,16 @@ public class CrateConfig {
         }
 
         tag.put("music", musicList);
-        tag.putString("sceneHeader", this.sceneHeader == null ? "" : this.sceneHeader);
-        tag.putString("sceneSubtitle", this.sceneSubtitle == null ? "" : this.sceneSubtitle);
+        tag.put("sceneHeaderStyle", (this.sceneHeader == null ? new FSTextStyle() : this.sceneHeader).save());
+        tag.put("sceneSubtitleStyle", (this.sceneSubtitle == null ? new FSTextStyle() : this.sceneSubtitle).save());
+        tag.put("nameStyle", (this.nameStyle == null ? new FSTextStyle() : this.nameStyle).save());
         ListTag sceneList = new ListTag();
 
-        for (String line : this.sceneLines) {
-            sceneList.add(StringTag.valueOf(line));
+        for (FSTextStyle line : this.sceneLines) {
+            sceneList.add(line.save());
         }
 
-        tag.put("sceneLines", sceneList);
+        tag.put("sceneLineStyles", sceneList);
         ListTag listTag = new ListTag();
 
         for (ParticleLayer layer : this.particleLayers) {
@@ -294,19 +304,44 @@ public class CrateConfig {
             }
         }
 
-        if (tag.contains("sceneHeader")) {
-            c.sceneHeader = tag.getString("sceneHeader");
+        // Formato nuevo (estilo en campos aparte).
+        if (tag.contains("sceneHeaderStyle")) {
+            c.sceneHeader = FSTextStyle.load(tag.getCompound("sceneHeaderStyle"));
+        } else if (tag.contains("sceneHeader")) {
+            // Formato viejo: el estilo venia dentro de la cadena.
+            c.sceneHeader = FSTextStyle.migrate(tag.getString("sceneHeader"));
         }
 
-        if (tag.contains("sceneSubtitle")) {
-            c.sceneSubtitle = tag.getString("sceneSubtitle");
+        if (tag.contains("sceneSubtitleStyle")) {
+            c.sceneSubtitle = FSTextStyle.load(tag.getCompound("sceneSubtitleStyle"));
+        } else if (tag.contains("sceneSubtitle")) {
+            c.sceneSubtitle = FSTextStyle.migrate(tag.getString("sceneSubtitle"));
+        }
+
+        if (tag.contains("nameStyle")) {
+            c.nameStyle = FSTextStyle.load(tag.getCompound("nameStyle"));
         }
 
         c.sceneLines.clear();
-        ListTag sceneList = tag.getList("sceneLines", 8);
+        if (tag.contains("sceneLineStyles")) {
+            ListTag styled = tag.getList("sceneLineStyles", 10);
+            for (int s = 0; s < styled.size(); s++) {
+                c.sceneLines.add(FSTextStyle.load(styled.getCompound(s)));
+            }
+        } else {
+            ListTag legacy = tag.getList("sceneLines", 8);
+            for (int s = 0; s < legacy.size(); s++) {
+                c.sceneLines.add(FSTextStyle.migrate(legacy.getString(s)));
+            }
+        }
 
-        for (int s = 0; s < sceneList.size(); s++) {
-            c.sceneLines.add(sceneList.getString(s));
+        // El nombre de la caja pudo quedar con codigos dentro de builds anteriores:
+        // se limpian y se pasan al estilo, para que el campo del editor quede solo
+        // con el texto.
+        if (c.displayName != null && (c.displayName.contains("&#") || c.displayName.contains("<rainbow"))) {
+            FSTextStyle migrated = FSTextStyle.migrate(c.displayName);
+            c.nameStyle = migrated;
+            c.displayName = migrated.text;
         }
 
         c.particleLayers.clear();
