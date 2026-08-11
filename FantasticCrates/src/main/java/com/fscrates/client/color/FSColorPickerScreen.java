@@ -21,12 +21,22 @@ public class FSColorPickerScreen extends Screen {
     private static final int SWATCH = 13;
     private static final int PER_ROW = 8;
 
+    /** Devuelve el color elegido y los cuatro estilos de letra. */
+    public interface Sink {
+        void apply(int rgb, boolean bold, boolean italic, boolean underline, boolean strike);
+    }
+
     private final String titleText;
-    private final IntConsumer onPick;
+    private final String sample;
+    private final Sink onApply;
     private final Runnable onBack;
     private final List<Integer> palette = new ArrayList<>();
 
     private int current;
+    private boolean bold;
+    private boolean italic;
+    private boolean underline;
+    private boolean strike;
     private boolean suppress;
 
     private ColorWheelWidget wheel;
@@ -37,12 +47,27 @@ public class FSColorPickerScreen extends Screen {
     private int paletteX;
     private int paletteY;
 
-    public FSColorPickerScreen(String titleText, int initial, IntConsumer onPick, Runnable onBack) {
+    public FSColorPickerScreen(
+        String titleText,
+        String sample,
+        int initial,
+        boolean[] flags,
+        Sink onApply,
+        Runnable onBack
+    ) {
         super(Component.literal(titleText));
         this.titleText = titleText;
+        this.sample = sample == null || sample.isBlank() ? "Texto de ejemplo" : sample;
         this.current = initial & 0xFFFFFF;
-        this.onPick = onPick;
+        this.onApply = onApply;
         this.onBack = onBack;
+
+        if (flags != null && flags.length >= 4) {
+            this.bold = flags[0];
+            this.italic = flags[1];
+            this.underline = flags[2];
+            this.strike = flags[3];
+        }
 
         for (ChatFormatting f : ChatFormatting.values()) {
             if (f.isColor() && f.getColor() != null) {
@@ -75,9 +100,18 @@ public class FSColorPickerScreen extends Screen {
         this.paletteX = this.leftX;
         this.paletteY = y + 108;
 
+        // Estilos de letra: negrita, cursiva, subrayado y tachado.
+        int sx = rx;
+        int sy = y + 46;
+        int sw = 49;
+        this.addStyleToggle(sx, sy, sw, "\u00a7lNegrita", this.bold, () -> this.bold = !this.bold);
+        this.addStyleToggle(sx + sw + 2, sy, sw, "\u00a7oCursiva", this.italic, () -> this.italic = !this.italic);
+        this.addStyleToggle(sx, sy + 20, sw, "\u00a7nSubray.", this.underline, () -> this.underline = !this.underline);
+        this.addStyleToggle(sx + sw + 2, sy + 20, sw, "\u00a7mTachado", this.strike, () -> this.strike = !this.strike);
+
         this.addRenderableWidget(Button.builder(Component.literal("\u00a7aHecho"), b -> {
-            if (this.onPick != null) {
-                this.onPick.accept(this.current);
+            if (this.onApply != null) {
+                this.onApply.apply(this.current, this.bold, this.italic, this.underline, this.strike);
             }
             this.onClose();
         }).bounds(this.width / 2 + 20, 8, 90, 18).build());
@@ -89,6 +123,15 @@ public class FSColorPickerScreen extends Screen {
         );
 
         this.apply(this.current, true);
+    }
+
+    private void addStyleToggle(int x, int y, int w, String label, boolean state, Runnable toggle) {
+        this.addRenderableWidget(
+            Button.builder(Component.literal((state ? "\u00a7a\u2714 " : "\u00a77") + label), b -> {
+                toggle.run();
+                this.rebuildWidgets();
+            }).bounds(x, y, w, 18).build()
+        );
     }
 
     private void apply(int color, boolean syncHex) {
@@ -149,11 +192,28 @@ public class FSColorPickerScreen extends Screen {
         }
 
         int rx = this.leftX + 130;
-        int pyv = 88;
-        g.fill(rx, pyv, rx + 100, pyv + 24, 0xFF000000 | this.current);
-        g.renderOutline(rx, pyv, 100, 24, -16777216);
-        g.drawString(this.font, FSColors.toHex(this.current), rx, pyv + 30, -1, false);
-        g.drawString(this.font, "Aa \u00c1\u00e9 123", rx + 2, pyv + 8, 0xFF000000 | this.current, true);
+        g.fill(rx, 24 + 6, rx + 100, 24 + 22, 0xFF000000 | this.current);
+        g.renderOutline(rx, 24 + 6, 100, 16, -16777216);
+        g.drawString(this.font, FSColors.toHex(this.current), rx + 104, 24 + 10, -1, false);
+
+        // Vista previa con el color y los estilos aplicados de verdad.
+        StringBuilder codes = new StringBuilder();
+        if (this.bold) {
+            codes.append("\u00a7l");
+        }
+        if (this.italic) {
+            codes.append("\u00a7o");
+        }
+        if (this.underline) {
+            codes.append("\u00a7n");
+        }
+        if (this.strike) {
+            codes.append("\u00a7m");
+        }
+        String preview = codes + this.font.plainSubstrByWidth(this.sample, 120);
+        g.drawString(this.font, "\u00a77Vista previa:", rx, 196, 0xFFAAAAAA, false);
+        g.fill(rx - 2, 206, rx + 128, 224, 0x60000000);
+        g.drawString(this.font, preview, rx, 211, 0xFF000000 | this.current, true);
     }
 
     @Override

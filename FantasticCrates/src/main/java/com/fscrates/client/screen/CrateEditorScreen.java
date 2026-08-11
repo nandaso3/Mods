@@ -324,14 +324,39 @@ public class CrateEditorScreen extends Screen {
      * hexadecimal, asi se puede usar cualquier RGB y no solo los 16 clasicos.
      */
     private void openColorPicker(String current, Consumer<String> result) {
-        String plain = FSText.plain(current == null ? "" : current);
-        int initial = colorOf(current == null ? "" : current);
+        String raw = current == null ? "" : current;
+        String plain = FSText.plain(raw);
+        int initial = colorOf(raw);
+        String lower = raw.toLowerCase(Locale.ROOT);
+        boolean[] flags = {
+            lower.contains("&l") || lower.contains("\u00a7l"),
+            lower.contains("&o") || lower.contains("\u00a7o"),
+            lower.contains("&n") || lower.contains("\u00a7n"),
+            lower.contains("&m") || lower.contains("\u00a7m")
+        };
 
         this.minecraft.setScreen(
             new FSColorPickerScreen(
-                "Color del mensaje",
+                "Color y estilo del mensaje",
+                plain,
                 initial,
-                rgb -> result.accept(String.format("&#%06X", rgb & 0xFFFFFF) + plain),
+                flags,
+                (rgb, bold, italic, underline, strike) -> {
+                    StringBuilder sb = new StringBuilder(String.format("&#%06X", rgb & 0xFFFFFF));
+                    if (bold) {
+                        sb.append("&l");
+                    }
+                    if (italic) {
+                        sb.append("&o");
+                    }
+                    if (underline) {
+                        sb.append("&n");
+                    }
+                    if (strike) {
+                        sb.append("&m");
+                    }
+                    result.accept(sb.append(plain).toString());
+                },
                 () -> this.minecraft.setScreen(this)
             )
         );

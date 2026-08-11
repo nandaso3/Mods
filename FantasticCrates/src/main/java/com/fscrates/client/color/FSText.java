@@ -1,6 +1,8 @@
 package com.fscrates.client.color;
 
 import java.util.Locale;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
@@ -76,6 +78,63 @@ public final class FSText {
         return 0;
     }
 
+    /**
+     * Convierte a codigos clasicos, para sitios donde solo se puede usar texto
+     * con seccion: nombres de item, mensajes de chat, etc.
+     *
+     * Los colores hexadecimales se cambian por el codigo clasico mas parecido y
+     * las etiquetas de efecto se quitan (el arcoiris se queda en morado claro).
+     */
+    public static String toLegacy(String raw) {
+        if (raw == null) {
+            return "";
+        }
+
+        String out = raw.replaceAll("(?i)<rainbow(:\\d+)?>", "&d")
+            .replaceAll("(?i)</rainbow>", "")
+            .replaceAll("(?i)</gradient>", "");
+
+        // <gradient:#AABBCC,#DDEEFF> -> el codigo mas parecido al primer color
+        Matcher gradient = Pattern.compile("(?i)<gradient:#?([0-9a-f]{6}),\\s*#?([0-9a-f]{6})>").matcher(out);
+        StringBuilder sb = new StringBuilder();
+        while (gradient.find()) {
+            gradient.appendReplacement(sb, "&" + nearestLegacyChar(Integer.parseInt(gradient.group(1), 16)));
+        }
+        gradient.appendTail(sb);
+        out = sb.toString();
+
+        // &#RRGGBB -> codigo clasico mas parecido
+        Matcher hex = Pattern.compile("[&\u00a7]#([0-9a-fA-F]{6})").matcher(out);
+        StringBuilder sb2 = new StringBuilder();
+        while (hex.find()) {
+            hex.appendReplacement(sb2, "&" + nearestLegacyChar(Integer.parseInt(hex.group(1), 16)));
+        }
+        hex.appendTail(sb2);
+        return sb2.toString();
+    }
+
+    /** Codigo clasico (0-9, a-f) cuyo color esta mas cerca del RGB dado. */
+    public static char nearestLegacyChar(int rgb) {
+        int r = rgb >> 16 & 0xFF;
+        int g = rgb >> 8 & 0xFF;
+        int b = rgb & 0xFF;
+        char best = 'f';
+        int bestDistance = Integer.MAX_VALUE;
+        String codes = "0123456789abcdef";
+        for (int i = 0; i < 16; i++) {
+            int c = legacyColor(i);
+            int dr = (c >> 16 & 0xFF) - r;
+            int dg = (c >> 8 & 0xFF) - g;
+            int db = (c & 0xFF) - b;
+            int distance = dr * dr + dg * dg + db * db;
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best = codes.charAt(i);
+            }
+        }
+        return best;
+    }
+
     /** Quita las etiquetas de efecto y los codigos de color, dejando el texto pelado. */
     public static String plain(String raw) {
         if (raw == null) {
@@ -106,7 +165,7 @@ public final class FSText {
      *
      * @param timeMs reloj para animar el arcoiris
      */
-    public static Component parse(String raw, long timeMs) {
+    public static MutableComponent parse(String raw, long timeMs) {
         if (raw == null || raw.isEmpty()) {
             return Component.empty();
         }

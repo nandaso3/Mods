@@ -20,6 +20,24 @@ import org.lwjgl.system.MemoryUtil;
 public final class VideoTexture extends AbstractTexture {
     private int width;
     private int height;
+    private boolean pixelPerfect;
+    private boolean filterApplied;
+
+    /**
+     * Elige el filtrado segun la escala a la que se va a dibujar.
+     *
+     * Cuando el video se dibuja pixel a pixel (escala 1:1, que es el caso de un
+     * video 1080p en una pantalla 1080p) se usa NEAREST: asi cada texel cae
+     * exactamente en su pixel y la imagen sale perfectamente nitida, sin el
+     * suavizado que mete el filtrado lineal. Si hay que escalar, LINEAR.
+     */
+    public void setSharpFiltering(boolean pixelPerfect) {
+        if (this.pixelPerfect != pixelPerfect || !this.filterApplied) {
+            this.pixelPerfect = pixelPerfect;
+            this.filterApplied = true;
+            this.setFilter(!pixelPerfect, false);
+        }
+    }
 
     /** Sube un fotograma RGBA. Debe llamarse en el hilo de render. */
     public void upload(ByteBuffer rgba, int frameWidth, int frameHeight) {
@@ -30,7 +48,7 @@ public final class VideoTexture extends AbstractTexture {
             TextureUtil.prepareImage(this.getId(), frameWidth, frameHeight);
             this.width = frameWidth;
             this.height = frameHeight;
-            this.setFilter(true, false);
+            this.filterApplied = false;
         }
 
         this.bind();

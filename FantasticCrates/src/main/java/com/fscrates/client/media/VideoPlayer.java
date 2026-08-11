@@ -231,6 +231,10 @@ public final class VideoPlayer implements AutoCloseable {
         int x = (targetWidth - dw) / 2;
         int y = (targetHeight - dh) / 2;
 
+        // Si el video cae 1:1 con la pantalla se dibuja sin suavizado, para que
+        // salga exactamente igual de nitido que el archivo original.
+        this.texture.setSharpFiltering(Math.abs(scale - 1.0F) < 0.01F);
+
         g.setColor(1.0F, 1.0F, 1.0F, Math.max(0.0F, Math.min(1.0F, alpha)));
         g.pose().pushPose();
         g.pose().scale((float) (1.0 / guiScale), (float) (1.0 / guiScale), 1.0F);

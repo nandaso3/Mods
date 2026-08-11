@@ -1,5 +1,6 @@
 package com.fscrates.command;
 
+import com.fscrates.client.color.FSText;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.JsonCrateLoader;
 import com.fscrates.config.RewardEntry;
@@ -251,7 +252,11 @@ public final class FSCrateCommand {
                 return 0;
             } else {
                 Random random = new Random();
-                player.sendSystemMessage(Component.literal("\u00a7d\u2726 Vista previa de " + LootEngine.colorize(crate.displayName) + "\u00a7r\u00a7d:"));
+                player.sendSystemMessage(
+                    Component.literal(
+                        "\u00a7d\u2726 Vista previa de " + LootEngine.colorize(FSText.toLegacy(crate.displayName)) + "\u00a7r\u00a7d:"
+                    )
+                );
 
                 for (int i = 0; i < 5; i++) {
                     List<RewardEntry> rolled = LootEngine.roll(crate, random);

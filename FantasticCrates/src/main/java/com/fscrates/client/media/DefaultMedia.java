@@ -3,6 +3,9 @@ package com.fscrates.client.media;
 import com.fscrates.FSCrates;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.net.URLConnection;
+import java.util.stream.Stream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -38,6 +41,29 @@ public final class DefaultMedia {
         return MediaCache.cacheRoot().resolve("defaults");
     }
 
+    /**
+     * Deja la media por defecto ya extraida en disco, en segundo plano.
+     *
+     * Se llama al arrancar el cliente para que la PRIMERA apertura de una caja no
+     * tenga que descomprimir 35 MB del JAR justo en ese momento, que es lo que
+     * daba tirones al juego y al video la primera vez.
+     */
+    public static void warmUp() {
+        Thread thread = new Thread(() -> {
+            try {
+                videos();
+                music();
+                poster();
+                FSCrates.LOGGER.info("[FSCrates] Media por defecto lista en cache.");
+            } catch (Throwable t) {
+                FSCrates.LOGGER.warn("[FSCrates] No se pudo precargar la media por defecto: {}", t.toString());
+            }
+        }, "FSCrates-MediaWarmup");
+        thread.setDaemon(true);
+        thread.setPriority(Thread.MIN_PRIORITY);
+        thread.start();
+    }
+
     public static List<Path> videos() {
         List<Path> out = new ArrayList<>();
         Path video = extract(VIDEO);
@@ -65,28 +91,106 @@ public final class DefaultMedia {
      * Devuelve null si el recurso no existe en el JAR.
      */
     public static synchronized Path extract(String name) {
-        Path target = defaultsFolder().resolve(name);
         try {
+            // El nombre en disco lleva el tamano del recurso empaquetado.
+            //
+            // Antes se guardaba con el nombre pelado y se salia antes de tiempo si
+            // el archivo ya existia, asi que al actualizar el mod se seguia usando
+            // el video viejo del cache para siempre: los cambios de calidad no
+            // llegaban nunca. Con el tamano en el nombre, un video nuevo es un
+            // archivo nuevo, y las versiones viejas se borran solas.
+            long size = resourceSize(name);
+            int dot = name.lastIndexOf('.');
+            String base = dot > 0 ? name.substring(0, dot) : name;
+            String extension = dot > 0 ? name.substring(dot) : "";
+            String versioned = base + "_" + (size > 0 ? Long.toString(size) : "x") + extension;
+
+            Path target = defaultsFolder().resolve(versioned);
             if (MediaCache.isReady(target)) {
                 return target;
             }
 
             Files.createDirectories(target.getParent());
+            cleanOldVersions(base, extension, versioned);
+
             try (InputStream in = open(name)) {
                 if (in == null) {
                     FSCrates.LOGGER.warn("[FSCrates] No se encontro la media por defecto '{}' dentro del JAR.", name);
                     return null;
                 }
-                Path part = target.resolveSibling(name + ".part");
+                Path part = target.resolveSibling(versioned + ".part");
                 Files.copy(in, part, StandardCopyOption.REPLACE_EXISTING);
                 Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
             }
 
-            FSCrates.LOGGER.info("[FSCrates] Media por defecto extraida: {}", target.getFileName());
+            FSCrates.LOGGER.info("[FSCrates] Media por defecto extraida: {} ({} bytes)", target.getFileName(), size);
             return MediaCache.isReady(target) ? target : null;
         } catch (Exception e) {
             FSCrates.LOGGER.error("[FSCrates] No se pudo extraer la media por defecto '{}': {}", name, e.toString());
             return null;
+        }
+    }
+
+    /** Tamano del recurso dentro del JAR, o -1 si no se puede saber. */
+    private static long resourceSize(String name) {
+        try {
+            URL url = DefaultMedia.class.getResource("/assets/fscrates/media/" + name);
+            if (url != null) {
+                URLConnection connection = url.openConnection();
+                long length = connection.getContentLengthLong();
+                try {
+                    connection.getInputStream().close();
+                } catch (IOException ignored) {
+                }
+                if (length > 0L) {
+                    return length;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // Sin cabecera de tamano: se cuenta leyendo, que sigue siendo fiable.
+        try (InputStream in = open(name)) {
+            if (in == null) {
+                return -1L;
+            }
+            long total = 0L;
+            byte[] buffer = new byte[65536];
+            int read;
+            while ((read = in.read(buffer)) != -1) {
+                total += read;
+            }
+            return total;
+        } catch (Exception e) {
+            return -1L;
+        }
+    }
+
+    /** Borra versiones anteriores del mismo recurso para no dejar basura. */
+    private static void cleanOldVersions(String base, String extension, String keep) {
+        // Primero se recoge la lista y despues se borra: borrar mientras se recorre
+        // el directorio puede saltarse entradas.
+        List<Path> stale = new ArrayList<>();
+        try (Stream<Path> files = Files.list(defaultsFolder())) {
+            files.filter(p -> {
+                    String fileName = p.getFileName().toString();
+                    // Versiones anteriores y tambien el archivo sin version de las
+                    // primeras builds, que es el que se quedaba pegado para siempre.
+                    boolean versioned = fileName.startsWith(base + "_") && fileName.endsWith(extension);
+                    boolean legacy = fileName.equals(base + extension);
+                    return (versioned || legacy) && !fileName.equals(keep);
+                })
+                .forEach(stale::add);
+        } catch (IOException ignored) {
+            return;
+        }
+
+        for (Path path : stale) {
+            try {
+                Files.deleteIfExists(path);
+                FSCrates.LOGGER.info("[FSCrates] Borrada media por defecto obsoleta: {}", path.getFileName());
+            } catch (IOException ignored) {
+            }
         }
     }
 

@@ -141,8 +141,10 @@ final class GopDecoder implements AutoCloseable {
                 return null;
             }
 
-            // Como maximo 2 hilos, y solo con CPU de sobra.
-            int workers = 2;
+            // Hilos segun la CPU disponible: 2 para lo normal y hasta 4 en equipos
+            // grandes, que es lo que hace falta para un 1080p a 60 fps.
+            // Se deja siempre la mitad de los nucleos libres para el juego.
+            int workers = Math.max(2, Math.min(4, cores / 4));
             GopDecoder decoder = new GopDecoder(file, workers, seekFrames, total);
             FSCrates.LOGGER.info(
                 "[FSCrates] Video '{}': {} fotogramas, {} GOPs, decodificando con {} hilos.",

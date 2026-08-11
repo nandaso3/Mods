@@ -6,6 +6,7 @@ import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
 import com.fscrates.config.RewardEntry;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import net.minecraft.client.gui.GuiGraphics;
@@ -68,14 +69,22 @@ public class CratePoolScreen extends Screen {
 
     private void rebuildRows() {
         this.rows.clear();
+        // Ordenado de la rareza mas alta a la mas baja, y dentro de cada rareza
+        // por nombre: asi lo bueno se ve arriba y la lista no sale a lo loco.
+        List<RewardEntry> ordered = new ArrayList<>();
         for (RewardEntry entry : this.config.rewards) {
-            if (entry.type != RewardEntry.Type.ITEM) {
-                continue;
+            if (entry.type == RewardEntry.Type.ITEM) {
+                ordered.add(entry);
             }
+        }
+        ordered.sort(
+            Comparator.<RewardEntry>comparingInt(e -> -e.effectiveRarity(this.config.rarity).ordinal())
+                .thenComparing(e -> labelOf(e).toLowerCase(Locale.ROOT))
+        );
 
-            String label = entry.label == null || entry.label.isBlank()
-                ? (entry.item == null || entry.item.isEmpty() ? "(item vac\u00edo)" : entry.item.getHoverName().getString())
-                : entry.label;
+        for (RewardEntry entry : ordered) {
+
+            String label = labelOf(entry);
             Rarity rarity = entry.effectiveRarity(this.config.rarity);
             // El porcentaje SOLO si la crate lo tiene activado.
             String odds = this.config.showOdds
@@ -85,6 +94,14 @@ public class CratePoolScreen extends Screen {
         }
 
         this.scroll = Math.max(0, Math.min(this.maxScroll(), this.scroll));
+    }
+
+    /** Nombre que se muestra de una recompensa. */
+    private static String labelOf(RewardEntry entry) {
+        if (entry.label != null && !entry.label.isBlank()) {
+            return entry.label;
+        }
+        return entry.item == null || entry.item.isEmpty() ? "(item vac\u00edo)" : entry.item.getHoverName().getString();
     }
 
     private int listTop() {

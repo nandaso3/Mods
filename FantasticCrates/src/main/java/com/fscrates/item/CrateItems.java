@@ -1,5 +1,6 @@
 package com.fscrates.item;
 
+import com.fscrates.client.color.FSText;
 import com.fscrates.config.CrateConfig;
 import com.fscrates.config.Rarity;
 import com.fscrates.registry.ModRegistry;
@@ -37,7 +38,14 @@ public final class CrateItems {
         CompoundTag beTag = new CompoundTag();
         beTag.put("config", crate.save());
         stack.getOrCreateTag().put("BlockEntityTag", beTag);
-        MutableComponent name = Component.literal(crate.displayName.isEmpty() ? "\u2726 Crate " + crate.rarity.displayName() + " \u2726" : crate.displayName)
+        // El nombre del item solo admite codigos clasicos, asi que los colores
+        // hexadecimales y las etiquetas de efecto se pasan a su equivalente mas
+        // cercano en vez de salir como texto literal.
+        MutableComponent name = Component.literal(
+                crate.displayName.isEmpty()
+                    ? "\u2726 Crate " + crate.rarity.displayName() + " \u2726"
+                    : FSText.toLegacy(crate.displayName).replace('&', '\u00a7')
+            )
             .withStyle(crate.rarity.color());
         stack.setHoverName(name);
         if (crate.glow) {
