@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "com.claimblocks.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "refmap": "claimblocks.refmap.json",
+  "mixins": [
+    "PressurePlateMixin",
+    "DispenserBlockMixin"
+  ],
+  "client": [],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
