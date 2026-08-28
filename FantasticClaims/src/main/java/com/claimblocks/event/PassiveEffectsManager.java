@@ -75,23 +75,14 @@ public final class PassiveEffectsManager {
                 }
             } else if (flag1) {
                 grantedFlight.remove(uuid);
-                if (hasExternalFlight(serverplayer)) {
-                    serverplayer.displayClientMessage(Component.literal("[i] Saliste de la zona de vuelo.").withStyle(ChatFormatting.AQUA), true);
-                } else {
-                    serverplayer.getAbilities().mayfly = false;
-                    serverplayer.getAbilities().flying = false;
-                    serverplayer.onUpdateAbilities();
-                    serverplayer.displayClientMessage(Component.literal("[i] Saliste de la zona de vuelo.").withStyle(ChatFormatting.AQUA), true);
-                }
+                serverplayer.getAbilities().mayfly = false;
+                serverplayer.getAbilities().flying = false;
+                serverplayer.onUpdateAbilities();
+                serverplayer.displayClientMessage(Component.literal("[i] Saliste de la zona de vuelo.").withStyle(ChatFormatting.AQUA), true);
             }
         } else {
             grantedFlight.remove(uuid);
         }
-    }
-
-    private static boolean hasExternalFlight(ServerPlayer serverplayer) {
-        GameType gametype = serverplayer.gameMode.getGameModeForPlayer();
-        return gametype != GameType.CREATIVE && gametype != GameType.SPECTATOR ? serverplayer.getAbilities().flying : true;
     }
 
     private static void applyEffects(ServerPlayer serverplayer, Claim claim) {
