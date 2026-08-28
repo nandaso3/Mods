@@ -60,7 +60,7 @@ public final class PassiveEffectsManager {
         GameType gametype = serverplayer.gameMode.getGameModeForPlayer();
         if (gametype != GameType.CREATIVE && gametype != GameType.SPECTATOR) {
             boolean flag = false;
-            if (claim != null && paidLevel(claim.getTier()) >= 3 && claim.isOwner(serverplayer) && claim.getFlags().allowFlight) {
+            if (claim != null && paidLevel(claim.getTier()) >= 3 && claim.canModify(serverplayer) && claim.getFlags().allowFlight) {
                 flag = true;
             }
 
@@ -71,7 +71,7 @@ public final class PassiveEffectsManager {
                     serverplayer.getAbilities().mayfly = true;
                     serverplayer.onUpdateAbilities();
                     grantedFlight.add(uuid);
-                    serverplayer.displayClientMessage(Component.literal("✔ Vuelo activado (Owner 500x500).").withStyle(ChatFormatting.GREEN), true);
+                    serverplayer.displayClientMessage(Component.literal("✔ Vuelo activado (zona 500x500).").withStyle(ChatFormatting.GREEN), true);
                 }
             } else if (flag1) {
                 grantedFlight.remove(uuid);

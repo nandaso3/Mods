@@ -528,7 +528,7 @@ public class ClaimMenuHandler extends ChestMenu {
             case EFFECT_REGEN -> "Regenera vida a duenio y miembros";
             case EFFECT_RESIST -> "Reduce dano a duenio y miembros";
             case EFFECT_SPEED -> "Da velocidad a duenio y miembros";
-            case ALLOW_FLIGHT -> "Solo el duenio puede volar en su zona";
+            case ALLOW_FLIGHT -> "El duenio y los miembros pueden volar en la zona";
             default -> "Perk pasivo";
         };
     }
@@ -601,7 +601,7 @@ public class ClaimMenuHandler extends ChestMenu {
             case EFFECT_REGEN -> "Regenera vida a dueño y miembros";
             case EFFECT_RESIST -> "Reduce daño a dueño y miembros";
             case EFFECT_SPEED -> "Da velocidad a dueño y miembros";
-            case ALLOW_FLIGHT -> "Dueño puede volar";
+            case ALLOW_FLIGHT -> "Dueño y miembros pueden volar";
             case BUILDING -> "Intrusos no pueden colocar bloques";
             case BREAKING -> "Intrusos no pueden romper nada";
             case EXPLOSIONS -> "TNT y creepers no destruyen";
